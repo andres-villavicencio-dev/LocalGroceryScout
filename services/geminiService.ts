@@ -37,13 +37,31 @@ const parsePriceData = (text: string): ParsedPrice[] => {
 };
 
 export const identifyProductFromBarcode = async (barcode: string): Promise<string> => {
+  // 1. Try Open Food Facts API first (Free, no key required)
+  try {
+    const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data.status === 1 && data.product) {
+        const brand = data.product.brands ? `${data.product.brands} ` : '';
+        const name = data.product.product_name || '';
+        if (name) return `${brand}${name}`.trim();
+      }
+    }
+  } catch (e) {
+    console.warn("OpenFoodFacts lookup failed", e);
+  }
+
+  // 2. Fallback to Gemini with Search Grounding
   if (!API_KEY) throw new Error("API Key not found");
   const ai = new GoogleGenAI({ apiKey: API_KEY });
   
   const prompt = `
     I have a barcode number: ${barcode}. 
     Search the web to identify the exact product name and brand.
-    Return ONLY the product name. Do not add any introductory text.
+    Return ONLY the product name. 
+    If you cannot identify the product with high certainty, return "UNKNOWN".
+    Do not provide any introductory text or explanation.
   `;
 
   const response = await ai.models.generateContent({
@@ -54,8 +72,14 @@ export const identifyProductFromBarcode = async (barcode: string): Promise<strin
     }
   });
   
-  const text = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  return text.trim().replace(/\.$/, ''); // Remove trailing period if any
+  const text = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+  
+  // Validation: if text is too long (likely an explanation) or indicates failure
+  if (!text || text.length > 80 || text.toUpperCase().includes("UNKNOWN") || text.toLowerCase().includes("unable to")) {
+    throw new Error("Product could not be identified from barcode.");
+  }
+
+  return text.replace(/\.$/, '');
 }
 
 export const fetchGroceryPrices = async (

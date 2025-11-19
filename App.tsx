@@ -112,7 +112,8 @@ const App: React.FC = () => {
         // Then, search for it
         performSearch(identifiedName);
     } catch (err: any) {
-        setError("Could not identify product from barcode. " + err.message);
+        console.error("Barcode scan failed:", err);
+        setError("Could not identify product from barcode. Please try searching by name.");
         setState(AppState.ERROR);
     }
   };
