@@ -1,9 +1,11 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { fetchGroceryPrices, identifyProductFromBarcode } from './services/geminiService';
-import { GeoLocation, SearchResult, AppState, ProductHistory, ShoppingList, ShoppingListItem } from './types';
+import { GeoLocation, SearchResult, AppState, ProductHistory, ShoppingList, ShoppingListItem, User } from './types';
 import { ResultsView } from './components/ResultsView';
 import { ShoppingListView } from './components/ShoppingListView';
 import { BarcodeScanner } from './components/BarcodeScanner';
+import { AuthModal } from './components/AuthModal';
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>(AppState.IDLE);
@@ -11,49 +13,94 @@ const App: React.FC = () => {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<SearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  // Data persistence
-  const [shoppingLists, setShoppingLists] = useState<ShoppingList[]>(() => {
-    const saved = localStorage.getItem('shoppingLists');
-    return saved ? JSON.parse(saved) : [];
+  
+  // Auth State
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem('grocery_user');
+    return saved ? JSON.parse(saved) : null;
   });
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
-  const [priceHistory, setPriceHistory] = useState<Record<string, ProductHistory>>(() => {
-    const saved = localStorage.getItem('priceHistory');
-    return saved ? JSON.parse(saved) : {};
-  });
+  // Data Persistence - State holders
+  const [shoppingLists, setShoppingLists] = useState<ShoppingList[]>([]);
+  const [priceHistory, setPriceHistory] = useState<Record<string, ProductHistory>>({});
 
-  // Save to local storage whenever data changes
+  // Effect: Load data when User changes (Switch profile)
   useEffect(() => {
-    localStorage.setItem('shoppingLists', JSON.stringify(shoppingLists));
-  }, [shoppingLists]);
+    const userSuffix = user ? `_${user.id}` : '_guest';
+    
+    const savedLists = localStorage.getItem(`shoppingLists${userSuffix}`);
+    setShoppingLists(savedLists ? JSON.parse(savedLists) : []);
+
+    const savedHistory = localStorage.getItem(`priceHistory${userSuffix}`);
+    setPriceHistory(savedHistory ? JSON.parse(savedHistory) : {});
+  }, [user]);
+
+  // Effect: Save data when it changes (Debounced slightly by react nature)
+  useEffect(() => {
+    const userSuffix = user ? `_${user.id}` : '_guest';
+    localStorage.setItem(`shoppingLists${userSuffix}`, JSON.stringify(shoppingLists));
+  }, [shoppingLists, user]);
 
   useEffect(() => {
-    localStorage.setItem('priceHistory', JSON.stringify(priceHistory));
-  }, [priceHistory]);
+    const userSuffix = user ? `_${user.id}` : '_guest';
+    localStorage.setItem(`priceHistory${userSuffix}`, JSON.stringify(priceHistory));
+  }, [priceHistory, user]);
+
+  // Save user session
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem('grocery_user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('grocery_user');
+    }
+  }, [user]);
 
   // Request location on mount
   useEffect(() => {
     if (navigator.geolocation) {
-      setState(AppState.LOCATING);
+      if (state === AppState.IDLE) setState(AppState.LOCATING);
       navigator.geolocation.getCurrentPosition(
         (position) => {
           setLocation({
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
           });
-          setState(AppState.READY);
+          if (state === AppState.LOCATING) setState(AppState.READY);
         },
         (err) => {
           console.warn("Geolocation denied or failed:", err);
-          setState(AppState.READY);
+          if (state === AppState.LOCATING) setState(AppState.READY);
         },
         { timeout: 10000, enableHighAccuracy: true }
       );
     } else {
-      setState(AppState.READY);
+      if (state === AppState.IDLE) setState(AppState.READY);
     }
-  }, []);
+  }, []); // Only run once
+
+  const handleLogin = () => {
+    // Mock Login Logic
+    const mockUser: User = {
+      id: 'google_12345',
+      name: 'Demo User',
+      email: 'demo.user@gmail.com',
+      avatar: 'https://lh3.googleusercontent.com/a/default-user=s96-c' // Dummy avatar
+    };
+    setUser(mockUser);
+    setShowAuthModal(false);
+    
+    // If we were in IDLE/LOCATING, stay there, but if in LISTS, we stay in LISTS
+    // If we were guest, we now switch to user data automatically via useEffect
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    setState(AppState.READY);
+    setQuery('');
+    setResult(null);
+    // Data automatically switches to guest via useEffect
+  };
 
   const updatePriceHistory = (productName: string, newData: SearchResult) => {
     if (!newData.parsedPrices || newData.parsedPrices.length === 0) return;
@@ -113,7 +160,7 @@ const App: React.FC = () => {
         performSearch(identifiedName);
     } catch (err: any) {
         console.error("Barcode scan failed:", err);
-        setError("Could not identify product from barcode. Please try searching by name.");
+        setError(err.message || "Could not identify product from barcode. Please try searching by name.");
         setState(AppState.ERROR);
     }
   };
@@ -128,11 +175,9 @@ const App: React.FC = () => {
             createdAt: Date.now()
         };
         setShoppingLists([defaultList]);
-    }
-    
-    setShoppingLists(prev => {
-        // Add to the first list or currently selected logic (simplified to first for now)
-        const targetList = prev[0]; 
+        
+        // Small hack to ensure we add to the new list immediately, 
+        // in a real app we'd wait for state update or use a ref
         const newItem: ShoppingListItem = {
             id: Date.now().toString(),
             name: itemName,
@@ -141,13 +186,28 @@ const App: React.FC = () => {
             bestPrice: price,
             bestStore: store
         };
-        
-        const newLists = [...prev];
-        newLists[0] = { ...targetList, items: [...targetList.items, newItem] };
-        return newLists;
-    });
+        defaultList.items.push(newItem);
+        // Update happens via setShoppingLists logic below, but we need to be careful about race conditions with the init above
+        // For simplicity in this demo, we'll just update the state directly with the new item included
+        setShoppingLists([defaultList]);
+    } else {
+        setShoppingLists(prev => {
+            const targetList = prev[0]; 
+            const newItem: ShoppingListItem = {
+                id: Date.now().toString(),
+                name: itemName,
+                checked: false,
+                addedAt: Date.now(),
+                bestPrice: price,
+                bestStore: store
+            };
+            
+            const newLists = [...prev];
+            newLists[0] = { ...targetList, items: [...targetList.items, newItem] };
+            return newLists;
+        });
+    }
     
-    // Optional: Show toast notification
     alert(`Added "${itemName}" to ${shoppingLists[0]?.name || 'list'}`);
   };
 
@@ -217,7 +277,7 @@ const App: React.FC = () => {
             onClick={() => setState(AppState.LISTS)}
             className="flex items-center text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-6 py-3 rounded-lg font-medium transition-colors"
         >
-            <span className="mr-2">📝</span> View Shopping Lists ({shoppingLists.length})
+            <span className="mr-2">📝</span> View Shopping Lists
         </button>
       </div>
     </div>
@@ -254,28 +314,54 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50 flex flex-col">
       {/* Navbar */}
-      <nav className="p-4 sm:p-6 flex justify-between items-center max-w-6xl mx-auto w-full">
+      <nav className="p-4 sm:p-6 flex justify-between items-center max-w-6xl mx-auto w-full z-20">
         <div className="flex items-center space-x-2 text-emerald-700 font-bold text-xl cursor-pointer" onClick={handleReset}>
-           <span>🥬</span> <span>GroceryScout</span>
+           <span>🥬</span> <span className="hidden sm:inline">GroceryScout</span>
         </div>
-        <div className="flex items-center gap-4">
+        
+        <div className="flex items-center gap-3 sm:gap-6">
+            {location && (
+            <div className="hidden md:flex items-center text-xs font-medium bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full">
+                <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                Location Active
+            </div>
+            )}
+
             <button 
                 onClick={() => setState(AppState.LISTS)} 
                 className={`text-sm font-medium ${state === AppState.LISTS ? 'text-emerald-600' : 'text-gray-500 hover:text-emerald-600'}`}
             >
                 Lists
             </button>
-            {location && (
-            <div className="hidden sm:flex items-center text-xs font-medium bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full">
-                <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-                Location Active
-            </div>
+
+            {user ? (
+              <div className="flex items-center gap-3 pl-3 border-l border-gray-200">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-emerald-200 flex items-center justify-center text-emerald-800 font-bold text-xs overflow-hidden">
+                    {user.avatar ? <img src={user.avatar} alt={user.name} className="w-full h-full" /> : user.name[0]}
+                  </div>
+                  <span className="text-sm font-medium text-gray-700 hidden sm:inline">{user.name}</span>
+                </div>
+                <button 
+                  onClick={handleLogout}
+                  className="text-xs text-gray-400 hover:text-red-500 font-medium"
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={() => setShowAuthModal(true)}
+                className="bg-white text-emerald-600 border border-emerald-200 px-4 py-1.5 rounded-full text-sm font-bold hover:bg-emerald-50 transition-colors"
+              >
+                Sign In
+              </button>
             )}
         </div>
       </nav>
 
       {/* Main Content */}
-      <main className="flex-1 w-full">
+      <main className="flex-1 w-full flex flex-col relative">
         {(state === AppState.IDLE || state === AppState.READY || state === AppState.LOCATING) && renderHero()}
         {state === AppState.SEARCHING && renderLoading()}
         {state === AppState.RESULTS && result && (
@@ -299,6 +385,8 @@ const App: React.FC = () => {
                 lists={shoppingLists} 
                 setLists={setShoppingLists}
                 onSearchItem={performSearch}
+                user={user}
+                onLoginRequest={() => setShowAuthModal(true)}
             />
         )}
       </main>
@@ -307,6 +395,14 @@ const App: React.FC = () => {
       <footer className="py-6 text-center text-gray-400 text-sm border-t border-gray-100 mt-auto">
         <p>Powered by Google Gemini • Maps & Search Grounding</p>
       </footer>
+
+      {/* Modals */}
+      {showAuthModal && (
+        <AuthModal 
+          onLogin={handleLogin} 
+          onClose={() => setShowAuthModal(false)} 
+        />
+      )}
     </div>
   );
 };

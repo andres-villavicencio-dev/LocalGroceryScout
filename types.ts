@@ -1,3 +1,4 @@
+
 export interface GeoLocation {
   latitude: number;
   longitude: number;
@@ -47,6 +48,14 @@ export enum AppState {
   ERROR = 'ERROR',
   SCANNING = 'SCANNING',
   LISTS = 'LISTS'
+}
+
+// Auth Types
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  avatar?: string;
 }
 
 // Shopping List Types

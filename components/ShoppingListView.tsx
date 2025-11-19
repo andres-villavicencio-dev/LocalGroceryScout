@@ -1,19 +1,23 @@
+
 import React, { useState } from 'react';
-import { ShoppingList, ShoppingListItem } from '../types';
+import { ShoppingList, ShoppingListItem, User } from '../types';
 
 interface ShoppingListViewProps {
   lists: ShoppingList[];
   setLists: (lists: ShoppingList[]) => void;
   onSearchItem: (query: string) => void;
+  user: User | null;
+  onLoginRequest: () => void;
 }
 
-export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLists, onSearchItem }) => {
+export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLists, onSearchItem, user, onLoginRequest }) => {
   const [activeListId, setActiveListId] = useState<string>(lists.length > 0 ? lists[0].id : '');
   const [newItemName, setNewItemName] = useState('');
   const [newListName, setNewListName] = useState('');
   const [isCreatingList, setIsCreatingList] = useState(false);
 
-  const activeList = lists.find(l => l.id === activeListId);
+  // Ensure we have a valid active list
+  const activeList = lists.find(l => l.id === activeListId) || (lists.length > 0 ? lists[0] : undefined);
 
   const createList = (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,7 +57,7 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
     };
 
     const updatedLists = lists.map(list => {
-      if (list.id === activeListId) {
+      if (list.id === activeList.id) {
         return { ...list, items: [...list.items, newItem] };
       }
       return list;
@@ -64,8 +68,9 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
   };
 
   const toggleItem = (itemId: string) => {
+    if (!activeList) return;
     const updatedLists = lists.map(list => {
-      if (list.id === activeListId) {
+      if (list.id === activeList.id) {
         const updatedItems = list.items.map(item => 
           item.id === itemId ? { ...item, checked: !item.checked } : item
         );
@@ -77,8 +82,9 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
   };
 
   const removeItem = (itemId: string) => {
+    if (!activeList) return;
     const updatedLists = lists.map(list => {
-      if (list.id === activeListId) {
+      if (list.id === activeList.id) {
         return { ...list, items: list.items.filter(i => i.id !== itemId) };
       }
       return list;
@@ -90,18 +96,34 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
     return list.items.reduce((acc, item) => acc + (item.bestPrice || 0), 0);
   };
 
+  // Empty State
   if (lists.length === 0 && !isCreatingList) {
     return (
-      <div className="flex flex-col items-center justify-center py-16">
+      <div className="max-w-4xl mx-auto p-4 w-full flex flex-col items-center justify-center py-16 text-center">
         <div className="text-6xl mb-4">📝</div>
-        <h3 className="text-xl font-bold text-gray-800 mb-2">No Shopping Lists Yet</h3>
-        <p className="text-gray-500 mb-6">Create a list to track items and compare prices.</p>
-        <button 
-          onClick={() => setIsCreatingList(true)}
-          className="bg-emerald-500 text-white px-6 py-3 rounded-full font-semibold hover:bg-emerald-600 transition-all"
-        >
-          Create New List
-        </button>
+        <h3 className="text-xl font-bold text-gray-800 mb-2">
+          {user ? `Welcome, ${user.name.split(' ')[0]}!` : 'Start Your Shopping List'}
+        </h3>
+        <p className="text-gray-500 mb-6 max-w-sm">
+          Create a list to track items and compare prices.
+          {!user && " Sign in to save your lists across devices."}
+        </p>
+        <div className="flex gap-4">
+          <button 
+            onClick={() => setIsCreatingList(true)}
+            className="bg-emerald-500 text-white px-6 py-3 rounded-full font-semibold hover:bg-emerald-600 transition-all"
+          >
+            Create New List
+          </button>
+          {!user && (
+            <button 
+              onClick={onLoginRequest}
+              className="bg-white text-emerald-600 border border-emerald-200 px-6 py-3 rounded-full font-semibold hover:bg-emerald-50 transition-all"
+            >
+              Sign In
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -109,10 +131,18 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
   return (
     <div className="max-w-4xl mx-auto p-4 w-full">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4 sm:mb-0">My Shopping Lists</h2>
+        <div>
+            <h2 className="text-2xl font-bold text-gray-900">My Shopping Lists</h2>
+            {!user && (
+                <p className="text-xs text-amber-600 mt-1 flex items-center cursor-pointer hover:underline" onClick={onLoginRequest}>
+                    <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                    Guest Mode: Lists are not saved to account.
+                </p>
+            )}
+        </div>
         <button 
             onClick={() => setIsCreatingList(true)}
-            className="text-sm text-emerald-600 font-medium hover:text-emerald-800 flex items-center"
+            className="text-sm text-emerald-600 font-medium hover:text-emerald-800 flex items-center mt-2 sm:mt-0"
         >
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
             New List
@@ -141,7 +171,7 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
                 key={list.id}
                 onClick={() => setActiveListId(list.id)}
                 className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-medium transition-colors ${
-                    activeListId === list.id 
+                    activeList?.id === list.id 
                     ? 'bg-emerald-600 text-white shadow-md' 
                     : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
                 }`}
@@ -160,7 +190,7 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
                         {activeList.items.length} items • Est. Total: <span className="text-emerald-600 font-bold">${calculateTotal(activeList).toFixed(2)}</span>
                     </p>
                 </div>
-                <button onClick={() => deleteList(activeList.id)} className="text-red-400 hover:text-red-600 p-2">
+                <button onClick={() => deleteList(activeList.id)} className="text-red-400 hover:text-red-600 p-2" title="Delete List">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                 </button>
             </div>
