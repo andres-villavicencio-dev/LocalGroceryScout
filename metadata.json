@@ -1,0 +1,8 @@
+{
+  "name": "Local Grocery Scout",
+  "description": "Track and compare grocery prices from nearby stores using AI-powered search and mapping.",
+  "requestFramePermissions": [
+    "geolocation",
+    "camera"
+  ]
+}
