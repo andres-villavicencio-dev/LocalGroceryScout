@@ -192,6 +192,7 @@ export const fetchGroceryPricesForList = async (
     CRITICAL OUTPUT FORMAT:
     Return ONLY a separator line "---PRICE_DATA---" followed by a list of the best price found for each item.
     Format each line as: "Store Name|Price|Specific Product Found|Original List Item Name".
+    IMPORTANT: The "Original List Item Name" column MUST match the input item name exactly.
     
     Example:
     ---PRICE_DATA---

@@ -85,11 +85,13 @@ const App: React.FC = () => {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
           });
-          if (state === AppState.LOCATING) setState(AppState.READY);
+          // ONLY update state if we are still waiting for location. 
+          // If user clicked Scan (state=SCANNING) or typed (state=READY/SEARCHING), don't overwrite.
+          setState(current => current === AppState.LOCATING ? AppState.READY : current);
         },
         (err) => {
           console.warn("Geolocation denied or failed:", err);
-          if (state === AppState.LOCATING) setState(AppState.READY);
+          setState(current => current === AppState.LOCATING ? AppState.READY : current);
         },
         { timeout: 10000, enableHighAccuracy: true }
       );
@@ -197,12 +199,22 @@ const App: React.FC = () => {
             setShoppingLists(prevLists => prevLists.map(list => ({
                 ...list,
                 items: list.items.map(item => {
-                    // Find matching price update
-                    // We use originalQuery if available, otherwise fallback to name match
-                    const match = prices.find(p => 
-                        (p.originalQuery && p.originalQuery.toLowerCase() === item.name.toLowerCase()) || 
-                        (!p.originalQuery && item.name.toLowerCase().includes(p.productName?.toLowerCase() || ''))
-                    );
+                    // Find matching price update with robust matching
+                    const match = prices.find(p => {
+                        const query = p.originalQuery?.toLowerCase().trim();
+                        const itemName = item.name.toLowerCase().trim();
+                        
+                        // 1. Exact match on originalQuery
+                        if (query === itemName) return true;
+                        
+                        // 2. Containment match on originalQuery (e.g. "eggs" matches "large eggs")
+                        if (query && (itemName.includes(query) || query.includes(itemName))) return true;
+
+                        // 3. Fallback: Product name contains item name (e.g. "Lucerne Milk" contains "Milk")
+                        if (p.productName?.toLowerCase().includes(itemName)) return true;
+
+                        return false;
+                    });
 
                     if (match) {
                         return {
@@ -215,10 +227,12 @@ const App: React.FC = () => {
                     return item;
                 })
             })));
+        } else {
+            alert("No price data found for these items. Try searching for them individually.");
         }
-    } catch (e) {
+    } catch (e: any) {
         console.error("Bulk scout failed", e);
-        // Optionally show a toast or non-blocking error
+        alert("Failed to scout prices. Please try again.");
     } finally {
         setIsScouting(false);
     }
@@ -319,7 +333,7 @@ const App: React.FC = () => {
              <button
                 type="button"
                 onClick={() => setState(AppState.SCANNING)}
-                className="p-3 text-gray-500 dark:text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-gray-700 rounded-full transition-colors"
+                className="p-3 text-gray-500 dark:text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-gray-700 rounded-full transition-colors z-20 relative pointer-events-auto"
                 title="Scan Barcode"
              >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
