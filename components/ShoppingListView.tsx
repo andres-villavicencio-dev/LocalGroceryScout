@@ -47,24 +47,37 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
   // Ensure we have a valid active list
   const activeList = lists.find(l => l.id === activeListId) || (lists.length > 0 ? lists[0] : undefined);
 
-  // Compute suggestions based on history
+  // Compute suggestions based on history and active list content
   const currentSuggestions = useMemo(() => {
     let bases = [...SUGGESTED_ITEMS];
+    let combined = bases;
     
     // If logged in and has history, prioritize those
     if (user && knownItems && knownItems.length > 0) {
-        // Filter knownItems to exclude ones already in the suggestion list to avoid duplicates with different emojis
-        // or just map them.
         const historySuggestions = knownItems
-            .filter(name => name.length < 20) // Filter out very long queries
+            .filter(name => name.length < 20) 
             .filter(name => !bases.some(b => b.name.toLowerCase() === name.toLowerCase()))
             .map(name => ({ name: name.charAt(0).toUpperCase() + name.slice(1), emoji: '🕒', category: 'Recent' }))
-            .slice(0, 6); // Take top 6 recent unique items
+            .slice(0, 6); 
         
-        return [...historySuggestions, ...bases];
+        combined = [...historySuggestions, ...bases];
     }
-    return bases;
-  }, [user, knownItems]);
+
+    // Filter out items that are already in the active list (using relaxed matching)
+    if (activeList) {
+        return combined.filter(suggestion => {
+            const suggestionName = suggestion.name.toLowerCase();
+            // Exclude if suggestion is contained in any active item name (e.g. "Cheese" in "Edam Cheese")
+            // OR if any active item name matches the suggestion exactly
+            return !activeList.items.some(activeItem => {
+                const activeName = activeItem.name.toLowerCase();
+                return activeName.includes(suggestionName) || suggestionName.includes(activeName);
+            });
+        });
+    }
+    
+    return combined;
+  }, [user, knownItems, activeList]);
 
   const sortedItems = useMemo(() => {
     if (!activeList) return [];
@@ -141,6 +154,7 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
 
   const handleManualAdd = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newItemName.trim()) return;
     addItemsToActiveList([newItemName]);
     setNewItemName('');
   };
@@ -340,15 +354,34 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
 
                 {/* Quick Add Section */}
                 <div className="mb-8">
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                      Quick Add
-                    </h4>
-                  </div>
+                  {currentSuggestions.length > 0 && (
+                    <>
+                    <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                        Quick Add
+                        </h4>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {currentSuggestions.map(item => (
+                        <button
+                            key={item.name}
+                            onClick={() => addItemsToActiveList([item.name])}
+                            className="group flex items-center px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-full hover:border-emerald-400 hover:shadow-sm dark:hover:border-emerald-500 transition-all"
+                        >
+                            <span className="mr-2">{item.emoji}</span>
+                            <span className="text-sm text-gray-700 dark:text-gray-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                            {item.name}
+                            </span>
+                            <span className="ml-1 text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-bold">+</span>
+                        </button>
+                        ))}
+                    </div>
+                    </>
+                  )}
                   
-                  {/* Empty List Bundle Call-to-Action */}
+                  {/* Empty List Bundle Call-to-Action - Only show if list is empty and suggestions didn't cover essentials */}
                   {activeList.items.length === 0 && (
-                    <div className="mb-4 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800 rounded-lg flex items-center justify-between">
+                    <div className="mt-4 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800 rounded-lg flex items-center justify-between">
                         <div>
                             <h5 className="font-bold text-emerald-800 dark:text-emerald-300">Start with Essentials?</h5>
                             <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">
@@ -363,22 +396,6 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
                         </button>
                     </div>
                   )}
-
-                  <div className="flex flex-wrap gap-2">
-                    {currentSuggestions.map(item => (
-                      <button
-                        key={item.name}
-                        onClick={() => addItemsToActiveList([item.name])}
-                        className="group flex items-center px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-full hover:border-emerald-400 hover:shadow-sm dark:hover:border-emerald-500 transition-all"
-                      >
-                        <span className="mr-2">{item.emoji}</span>
-                        <span className="text-sm text-gray-700 dark:text-gray-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
-                          {item.name}
-                        </span>
-                        <span className="ml-1 text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-bold">+</span>
-                      </button>
-                    ))}
-                  </div>
                 </div>
 
                 <div className="border-t border-gray-100 dark:border-gray-700 pt-6">

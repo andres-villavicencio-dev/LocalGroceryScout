@@ -182,11 +182,13 @@ export const fetchGroceryPricesForList = async (
   const tools: Tool[] = [{ googleMaps: {} }, { googleSearch: {} }];
   const toolConfig = location ? { retrievalConfig: { latLng: { latitude: location.latitude, longitude: location.longitude } } } : undefined;
 
-  // We chunk items if too many, but for now assume reasonable list size
-  const itemListStr = items.join(', ');
+  // Use bullet points for clarity to prevent comma issues in item names
+  const itemListStr = items.map(i => `- ${i}`).join('\n');
 
   const prompt = `
-    I have a shopping list with these items: ${itemListStr}.
+    I have a shopping list with these items:
+    ${itemListStr}
+    
     Find the current best prices for each of these items at nearby grocery stores.
     
     CRITICAL OUTPUT FORMAT:
