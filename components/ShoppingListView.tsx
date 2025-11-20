@@ -1,6 +1,8 @@
 
 import React, { useState } from 'react';
 import { ShoppingList, ShoppingListItem, User } from '../types';
+import { BarcodeScanner } from './BarcodeScanner';
+import { identifyProductFromBarcode } from '../services/geminiService';
 
 interface ShoppingListViewProps {
   lists: ShoppingList[];
@@ -10,11 +12,29 @@ interface ShoppingListViewProps {
   onLoginRequest: () => void;
 }
 
+const SUGGESTED_ITEMS = [
+  { name: 'Milk', emoji: '🥛', category: 'Dairy' },
+  { name: 'Eggs', emoji: '🥚', category: 'Dairy' },
+  { name: 'Bread', emoji: '🍞', category: 'Bakery' },
+  { name: 'Bananas', emoji: '🍌', category: 'Produce' },
+  { name: 'Avocado', emoji: '🥑', category: 'Produce' },
+  { name: 'Chicken', emoji: '🍗', category: 'Meat' },
+  { name: 'Rice', emoji: '🍚', category: 'Pantry' },
+  { name: 'Pasta', emoji: '🍝', category: 'Pantry' },
+  { name: 'Cheese', emoji: '🧀', category: 'Dairy' },
+  { name: 'Coffee', emoji: '☕', category: 'Beverages' },
+  { name: 'Apples', emoji: '🍎', category: 'Produce' },
+  { name: 'Tomatoes', emoji: '🍅', category: 'Produce' },
+  { name: 'Onions', emoji: '🧅', category: 'Produce' },
+  { name: 'Butter', emoji: '🧈', category: 'Dairy' },
+];
+
 export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLists, onSearchItem, user, onLoginRequest }) => {
   const [activeListId, setActiveListId] = useState<string>(lists.length > 0 ? lists[0].id : '');
   const [newItemName, setNewItemName] = useState('');
   const [newListName, setNewListName] = useState('');
   const [isCreatingList, setIsCreatingList] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
 
   // Ensure we have a valid active list
   const activeList = lists.find(l => l.id === activeListId) || (lists.length > 0 ? lists[0] : undefined);
@@ -45,13 +65,13 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
     }
   };
 
-  const addItem = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newItemName.trim() || !activeList) return;
+  const addItemToActiveList = (name: string) => {
+    if (!name.trim() || !activeList) return;
 
+    // Use a more unique ID generation to prevent collisions on fast clicks
     const newItem: ShoppingListItem = {
-      id: Date.now().toString(),
-      name: newItemName,
+      id: `${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      name: name,
       checked: false,
       addedAt: Date.now()
     };
@@ -64,6 +84,11 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
     });
 
     setLists(updatedLists);
+  };
+
+  const handleManualAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    addItemToActiveList(newItemName);
     setNewItemName('');
   };
 
@@ -96,15 +121,28 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
     return list.items.reduce((acc, item) => acc + (item.bestPrice || 0), 0);
   };
 
+  const handleBarcodeScan = async (code: string) => {
+    setShowScanner(false);
+    setNewItemName("Identifying product...");
+    try {
+        const name = await identifyProductFromBarcode(code);
+        setNewItemName(name);
+    } catch (e) {
+        console.error("Product identification failed", e);
+        setNewItemName("");
+        alert("Could not identify product from barcode. Please enter name manually.");
+    }
+  };
+
   // Empty State
   if (lists.length === 0 && !isCreatingList) {
     return (
       <div className="max-w-4xl mx-auto p-4 w-full flex flex-col items-center justify-center py-16 text-center">
         <div className="text-6xl mb-4">📝</div>
-        <h3 className="text-xl font-bold text-gray-800 mb-2">
+        <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">
           {user ? `Welcome, ${user.name.split(' ')[0]}!` : 'Start Your Shopping List'}
         </h3>
-        <p className="text-gray-500 mb-6 max-w-sm">
+        <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-sm">
           Create a list to track items and compare prices.
           {!user && " Sign in to save your lists across devices."}
         </p>
@@ -118,7 +156,7 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
           {!user && (
             <button 
               onClick={onLoginRequest}
-              className="bg-white text-emerald-600 border border-emerald-200 px-6 py-3 rounded-full font-semibold hover:bg-emerald-50 transition-all"
+              className="bg-white dark:bg-gray-800 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-700 px-6 py-3 rounded-full font-semibold hover:bg-emerald-50 dark:hover:bg-gray-700 transition-all"
             >
               Sign In
             </button>
@@ -132,9 +170,9 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
     <div className="max-w-4xl mx-auto p-4 w-full">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
         <div>
-            <h2 className="text-2xl font-bold text-gray-900">My Shopping Lists</h2>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">My Shopping Lists</h2>
             {!user && (
-                <p className="text-xs text-amber-600 mt-1 flex items-center cursor-pointer hover:underline" onClick={onLoginRequest}>
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center cursor-pointer hover:underline" onClick={onLoginRequest}>
                     <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                     Guest Mode: Lists are not saved to account.
                 </p>
@@ -142,25 +180,25 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
         </div>
         <button 
             onClick={() => setIsCreatingList(true)}
-            className="text-sm text-emerald-600 font-medium hover:text-emerald-800 flex items-center mt-2 sm:mt-0"
+            className="text-sm text-emerald-600 dark:text-emerald-400 font-medium hover:text-emerald-800 dark:hover:text-emerald-300 flex items-center mt-2 sm:mt-0"
         >
-            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
+            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
             New List
         </button>
       </div>
 
       {isCreatingList && (
-        <form onSubmit={createList} className="mb-8 bg-gray-50 p-4 rounded-lg border border-gray-200 flex gap-2">
+        <form onSubmit={createList} className="mb-8 bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 flex gap-2 transition-colors">
             <input
                 type="text"
                 value={newListName}
                 onChange={(e) => setNewListName(e.target.value)}
                 placeholder="List Name (e.g., 'Weekly Groceries')"
-                className="flex-1 px-4 py-2 rounded border border-gray-300 focus:outline-none focus:border-emerald-500"
+                className="flex-1 px-4 py-2 rounded border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:outline-none focus:border-emerald-500"
                 autoFocus
             />
             <button type="submit" className="bg-emerald-500 text-white px-4 py-2 rounded hover:bg-emerald-600">Create</button>
-            <button type="button" onClick={() => setIsCreatingList(false)} className="text-gray-500 px-4 py-2">Cancel</button>
+            <button type="button" onClick={() => setIsCreatingList(false)} className="text-gray-500 dark:text-gray-400 px-4 py-2">Cancel</button>
         </form>
       )}
 
@@ -173,7 +211,7 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
                 className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-medium transition-colors ${
                     activeList?.id === list.id 
                     ? 'bg-emerald-600 text-white shadow-md' 
-                    : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                    : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
                 }`}
             >
                 {list.name}
@@ -182,12 +220,12 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
       </div>
 
       {activeList && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden transition-colors">
+            <div className="p-6 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-700/50">
                 <div>
-                    <h3 className="text-lg font-bold text-gray-900">{activeList.name}</h3>
-                    <p className="text-sm text-gray-500">
-                        {activeList.items.length} items • Est. Total: <span className="text-emerald-600 font-bold">${calculateTotal(activeList).toFixed(2)}</span>
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">{activeList.name}</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {activeList.items.length} items • Est. Total: <span className="text-emerald-600 dark:text-emerald-400 font-bold">${calculateTotal(activeList).toFixed(2)}</span>
                     </p>
                 </div>
                 <button onClick={() => deleteList(activeList.id)} className="text-red-400 hover:text-red-600 p-2" title="Delete List">
@@ -196,55 +234,89 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
             </div>
 
             <div className="p-6">
-                <form onSubmit={addItem} className="mb-6 flex gap-2">
-                    <input 
-                        type="text" 
-                        value={newItemName}
-                        onChange={(e) => setNewItemName(e.target.value)}
-                        placeholder="Add item (e.g., Milk, Bread)..."
-                        className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                    />
+                <form onSubmit={handleManualAdd} className="mb-6 flex gap-2">
+                    <div className="relative flex-1">
+                        <input 
+                            type="text" 
+                            value={newItemName}
+                            onChange={(e) => setNewItemName(e.target.value)}
+                            placeholder="Add item (e.g., Milk, Bread)..."
+                            className="w-full px-4 py-3 pr-12 bg-gray-50 dark:bg-gray-700 dark:text-white border border-gray-200 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setShowScanner(true)}
+                            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                            title="Scan Barcode"
+                        >
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
+                        </button>
+                    </div>
                     <button type="submit" className="bg-emerald-500 text-white px-6 rounded-lg font-medium hover:bg-emerald-600 transition-colors">
                         Add
                     </button>
                 </form>
 
-                <div className="space-y-2">
+                {/* Quick Add Section */}
+                <div className="mb-8">
+                  <h4 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
+                    {activeList.items.length === 0 ? "Quick Start: Popular Items" : "Quick Add"}
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {SUGGESTED_ITEMS.map(item => (
+                      <button
+                        key={item.name}
+                        onClick={() => addItemToActiveList(item.name)}
+                        className="group flex items-center px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-full hover:border-emerald-400 hover:shadow-sm dark:hover:border-emerald-500 transition-all"
+                      >
+                        <span className="mr-2">{item.emoji}</span>
+                        <span className="text-sm text-gray-700 dark:text-gray-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                          {item.name}
+                        </span>
+                        <span className="ml-1 text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-bold">+</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2 border-t border-gray-100 dark:border-gray-700 pt-6">
                     {activeList.items.length === 0 ? (
-                        <p className="text-center text-gray-400 py-8 italic">Your list is empty. Add items above!</p>
+                        <div className="text-center py-8">
+                           <p className="text-gray-400 dark:text-gray-500 italic">Your list is empty.</p>
+                        </div>
                     ) : (
                         activeList.items.map(item => (
-                            <div key={item.id} className="group flex items-center bg-white border border-gray-100 p-3 rounded-lg hover:border-emerald-200 hover:shadow-sm transition-all">
+                            <div key={item.id} className="group flex items-center bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-3 rounded-lg hover:border-emerald-200 dark:hover:border-emerald-800 hover:shadow-sm transition-all">
                                 <input 
                                     type="checkbox" 
                                     checked={item.checked}
                                     onChange={() => toggleItem(item.id)}
-                                    className="w-5 h-5 text-emerald-500 rounded border-gray-300 focus:ring-emerald-500"
+                                    className="w-5 h-5 text-emerald-500 rounded border-gray-300 dark:border-gray-600 focus:ring-emerald-500 bg-white dark:bg-gray-700"
                                 />
                                 <div className="ml-3 flex-1">
-                                    <span className={`block font-medium ${item.checked ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+                                    <span className={`block font-medium ${item.checked ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-800 dark:text-gray-200'}`}>
                                         {item.name}
                                     </span>
                                     {item.bestPrice ? (
-                                        <span className="text-xs text-emerald-600 font-medium">
+                                        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
                                             Best: ${item.bestPrice} at {item.bestStore}
                                         </span>
                                     ) : (
-                                        <span className="text-xs text-gray-400">No price data yet</span>
+                                        <span className="text-xs text-gray-400 dark:text-gray-500">No price data yet</span>
                                     )}
                                 </div>
                                 
                                 <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button 
                                         onClick={() => onSearchItem(item.name)}
-                                        className="p-2 text-blue-500 hover:bg-blue-50 rounded-full mr-1"
+                                        className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-full mr-1"
                                         title="Search Prices"
                                     >
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                                     </button>
                                     <button 
                                         onClick={() => removeItem(item.id)}
-                                        className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full"
+                                        className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full"
                                         title="Remove"
                                     >
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -256,6 +328,13 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
                 </div>
             </div>
         </div>
+      )}
+
+      {showScanner && (
+        <BarcodeScanner 
+            onScan={handleBarcodeScan} 
+            onClose={() => setShowScanner(false)} 
+        />
       )}
     </div>
   );

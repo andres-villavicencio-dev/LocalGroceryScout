@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState } from 'react';
 
 // Type definition for the global library
@@ -55,7 +56,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScan, onClose 
 
   return (
     <div className="fixed inset-0 bg-black/90 z-50 flex flex-col items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
         <div className="p-4 bg-emerald-600 flex justify-between items-center text-white">
             <h3 className="font-bold text-lg">Scan Product Barcode</h3>
             <button onClick={onClose} className="p-1 hover:bg-emerald-700 rounded">
@@ -68,12 +69,12 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScan, onClose 
         </div>
 
         {error && (
-            <div className="p-4 text-red-600 bg-red-50 text-center">
+            <div className="p-4 text-red-600 bg-red-50 dark:bg-red-900/20 text-center">
                 {error}
             </div>
         )}
 
-        <div className="p-4 text-center text-sm text-gray-500">
+        <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800">
             Point camera at a barcode to search prices automatically.
         </div>
       </div>

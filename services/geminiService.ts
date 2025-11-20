@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Tool } from "@google/genai";
 import { GeoLocation, SearchResult, ParsedPrice } from "../types";
 
@@ -20,12 +21,17 @@ const parsePriceData = (text: string): ParsedPrice[] => {
       const lines = dataBlock.split('\n');
       
       for (const line of lines) {
-        const [store, priceStr] = line.split('|').map(s => s.trim());
+        // Format: Store|Price|ProductName
+        const [store, priceStr, productName] = line.split('|').map(s => s.trim());
         if (store && priceStr) {
           // Clean price string (remove currency symbols, approx, etc)
           const priceVal = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
           if (!isNaN(priceVal)) {
-            prices.push({ store, price: priceVal });
+            prices.push({ 
+              store, 
+              price: priceVal,
+              productName: productName || undefined
+            });
           }
         }
       }
@@ -121,11 +127,11 @@ export const fetchGroceryPrices = async (
     At the end, write a short summary recommendation.
 
     CRITICAL INSTRUCTION:
-    At the very end of your response, after your summary, you MUST output a separator line "---PRICE_DATA---" followed by a list of the stores and their SINGLE best numeric price found (no ranges, just one number). Format each line as: "Store Name|Price".
+    At the very end of your response, after your summary, you MUST output a separator line "---PRICE_DATA---" followed by a list of the stores and their SINGLE best numeric price found (no ranges, just one number) AND the specific product name associated with that price. Format each line as: "Store Name|Price|Product Name".
     Example:
     ---PRICE_DATA---
-    Safeway|5.99
-    Trader Joe's|4.49
+    Safeway|5.99|Lucerne Large Eggs 12ct
+    Trader Joe's|4.49|Trader Joe's Large White Eggs
   `;
 
   try {

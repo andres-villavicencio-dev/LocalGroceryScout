@@ -30,6 +30,7 @@ export interface GroundingMetadata {
 export interface ParsedPrice {
   store: string;
   price: number;
+  productName?: string;
 }
 
 export interface SearchResult {

@@ -20,7 +20,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin, onClose }) => {
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100 border border-gray-200 dark:border-gray-700">
         
         {/* Header */}
         <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 p-6 text-center">
@@ -37,10 +37,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin, onClose }) => {
             <button
               onClick={handleGoogleLogin}
               disabled={isLoading}
-              className="w-full flex items-center justify-center bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium py-3 px-4 rounded-lg transition-colors shadow-sm group relative"
+              className="w-full flex items-center justify-center bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-white font-medium py-3 px-4 rounded-lg transition-colors shadow-sm group relative"
             >
               {isLoading ? (
-                <svg className="animate-spin h-5 w-5 text-emerald-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <svg className="animate-spin h-5 w-5 text-emerald-600 dark:text-emerald-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
@@ -58,21 +58,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin, onClose }) => {
             </button>
 
             <div className="relative flex py-2 items-center">
-              <div className="flex-grow border-t border-gray-200"></div>
+              <div className="flex-grow border-t border-gray-200 dark:border-gray-700"></div>
               <span className="flex-shrink-0 mx-4 text-gray-400 text-xs uppercase">or</span>
-              <div className="flex-grow border-t border-gray-200"></div>
+              <div className="flex-grow border-t border-gray-200 dark:border-gray-700"></div>
             </div>
 
             <button
               onClick={onClose}
-              className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium py-3 px-4 rounded-lg transition-colors"
+              className="w-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 font-medium py-3 px-4 rounded-lg transition-colors"
             >
               Continue as Guest
             </button>
           </div>
         </div>
         
-        <div className="bg-gray-50 p-4 text-center text-xs text-gray-400 border-t border-gray-100">
+        <div className="bg-gray-50 dark:bg-gray-700/50 p-4 text-center text-xs text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700">
           By signing in, you agree to our Terms of Service and Privacy Policy.
         </div>
       </div>
