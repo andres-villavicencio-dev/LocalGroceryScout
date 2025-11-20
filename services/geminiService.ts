@@ -21,8 +21,8 @@ const parsePriceData = (text: string): ParsedPrice[] => {
       const lines = dataBlock.split('\n');
       
       for (const line of lines) {
-        // Format: Store|Price|ProductName
-        const [store, priceStr, productName] = line.split('|').map(s => s.trim());
+        // Format: Store|Price|ProductName|OriginalQuery(optional)
+        const [store, priceStr, productName, originalQuery] = line.split('|').map(s => s.trim());
         if (store && priceStr) {
           // Clean price string (remove currency symbols, approx, etc)
           const priceVal = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
@@ -30,7 +30,8 @@ const parsePriceData = (text: string): ParsedPrice[] => {
             prices.push({ 
               store, 
               price: priceVal,
-              productName: productName || undefined
+              productName: productName || undefined,
+              originalQuery: originalQuery || undefined
             });
           }
         }
@@ -167,5 +168,53 @@ export const fetchGroceryPrices = async (
   } catch (error) {
     console.error("Error fetching grocery prices:", error);
     throw error;
+  }
+};
+
+export const fetchGroceryPricesForList = async (
+  items: string[],
+  location?: GeoLocation
+): Promise<ParsedPrice[]> => {
+  if (!API_KEY) throw new Error("API Key not found");
+  if (items.length === 0) return [];
+
+  const ai = new GoogleGenAI({ apiKey: API_KEY });
+  const tools: Tool[] = [{ googleMaps: {} }, { googleSearch: {} }];
+  const toolConfig = location ? { retrievalConfig: { latLng: { latitude: location.latitude, longitude: location.longitude } } } : undefined;
+
+  // We chunk items if too many, but for now assume reasonable list size
+  const itemListStr = items.join(', ');
+
+  const prompt = `
+    I have a shopping list with these items: ${itemListStr}.
+    Find the current best prices for each of these items at nearby grocery stores.
+    
+    CRITICAL OUTPUT FORMAT:
+    Return ONLY a separator line "---PRICE_DATA---" followed by a list of the best price found for each item.
+    Format each line as: "Store Name|Price|Specific Product Found|Original List Item Name".
+    
+    Example:
+    ---PRICE_DATA---
+    Safeway|5.99|Lucerne Large Eggs 12ct|Eggs
+    Walmart|2.49|Great Value White Bread|Bread
+    Target|3.29|Gala Apples 3lb|Apples
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        tools,
+        toolConfig,
+      },
+    });
+
+    const text = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    return parsePriceData(text);
+  } catch (error) {
+    console.error("Error fetching list prices:", error);
+    // Return empty array on failure so app doesn't crash, just shows no updates
+    return [];
   }
 };

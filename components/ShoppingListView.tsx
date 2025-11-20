@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { ShoppingList, ShoppingListItem, User } from '../types';
 import { BarcodeScanner } from './BarcodeScanner';
 import { identifyProductFromBarcode } from '../services/geminiService';
@@ -8,8 +8,11 @@ interface ShoppingListViewProps {
   lists: ShoppingList[];
   setLists: (lists: ShoppingList[]) => void;
   onSearchItem: (query: string) => void;
+  onScoutList: (items: string[]) => void;
+  isScouting: boolean;
   user: User | null;
   onLoginRequest: () => void;
+  knownItems?: string[];
 }
 
 const SUGGESTED_ITEMS = [
@@ -29,15 +32,66 @@ const SUGGESTED_ITEMS = [
   { name: 'Butter', emoji: '🧈', category: 'Dairy' },
 ];
 
-export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLists, onSearchItem, user, onLoginRequest }) => {
+const ESSENTIALS_BUNDLE = ['Milk', 'Eggs', 'Bread', 'Bananas'];
+
+type SortOption = 'name-asc' | 'date-desc' | 'date-asc' | 'price-asc' | 'price-desc';
+
+export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLists, onSearchItem, onScoutList, isScouting, user, onLoginRequest, knownItems }) => {
   const [activeListId, setActiveListId] = useState<string>(lists.length > 0 ? lists[0].id : '');
   const [newItemName, setNewItemName] = useState('');
   const [newListName, setNewListName] = useState('');
   const [isCreatingList, setIsCreatingList] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
+  const [sortBy, setSortBy] = useState<SortOption>('date-desc');
 
   // Ensure we have a valid active list
   const activeList = lists.find(l => l.id === activeListId) || (lists.length > 0 ? lists[0] : undefined);
+
+  // Compute suggestions based on history
+  const currentSuggestions = useMemo(() => {
+    let bases = [...SUGGESTED_ITEMS];
+    
+    // If logged in and has history, prioritize those
+    if (user && knownItems && knownItems.length > 0) {
+        // Filter knownItems to exclude ones already in the suggestion list to avoid duplicates with different emojis
+        // or just map them.
+        const historySuggestions = knownItems
+            .filter(name => name.length < 20) // Filter out very long queries
+            .filter(name => !bases.some(b => b.name.toLowerCase() === name.toLowerCase()))
+            .map(name => ({ name: name.charAt(0).toUpperCase() + name.slice(1), emoji: '🕒', category: 'Recent' }))
+            .slice(0, 6); // Take top 6 recent unique items
+        
+        return [...historySuggestions, ...bases];
+    }
+    return bases;
+  }, [user, knownItems]);
+
+  const sortedItems = useMemo(() => {
+    if (!activeList) return [];
+    const items = [...activeList.items];
+    switch (sortBy) {
+      case 'name-asc':
+        return items.sort((a, b) => a.name.localeCompare(b.name));
+      case 'date-desc':
+        return items.sort((a, b) => b.addedAt - a.addedAt);
+      case 'date-asc':
+        return items.sort((a, b) => a.addedAt - b.addedAt);
+      case 'price-asc':
+        return items.sort((a, b) => {
+            const pA = a.bestPrice ?? Number.MAX_VALUE;
+            const pB = b.bestPrice ?? Number.MAX_VALUE;
+            return pA - pB;
+        });
+      case 'price-desc':
+        return items.sort((a, b) => {
+            const pA = a.bestPrice ?? -1;
+            const pB = b.bestPrice ?? -1;
+            return pB - pA;
+        });
+      default:
+        return items;
+    }
+  }, [activeList, sortBy]);
 
   const createList = (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,20 +119,19 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
     }
   };
 
-  const addItemToActiveList = (name: string) => {
-    if (!name.trim() || !activeList) return;
+  const addItemsToActiveList = (names: string[]) => {
+    if (names.length === 0 || !activeList) return;
 
-    // Use a more unique ID generation to prevent collisions on fast clicks
-    const newItem: ShoppingListItem = {
-      id: `${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+    const newItems: ShoppingListItem[] = names.map((name, index) => ({
+      id: `${Date.now()}-${index}-${Math.floor(Math.random() * 10000)}`,
       name: name,
       checked: false,
-      addedAt: Date.now()
-    };
+      addedAt: Date.now() + index // ensure slightly different timestamps
+    }));
 
     const updatedLists = lists.map(list => {
       if (list.id === activeList.id) {
-        return { ...list, items: [...list.items, newItem] };
+        return { ...list, items: [...list.items, ...newItems] };
       }
       return list;
     });
@@ -88,7 +141,7 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
 
   const handleManualAdd = (e: React.FormEvent) => {
     e.preventDefault();
-    addItemToActiveList(newItemName);
+    addItemsToActiveList([newItemName]);
     setNewItemName('');
   };
 
@@ -221,16 +274,44 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
 
       {activeList && (
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden transition-colors">
-            <div className="p-6 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-700/50">
+            <div className="p-6 border-b border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-gray-50 dark:bg-gray-700/50">
                 <div>
                     <h3 className="text-lg font-bold text-gray-900 dark:text-white">{activeList.name}</h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
                         {activeList.items.length} items • Est. Total: <span className="text-emerald-600 dark:text-emerald-400 font-bold">${calculateTotal(activeList).toFixed(2)}</span>
                     </p>
                 </div>
-                <button onClick={() => deleteList(activeList.id)} className="text-red-400 hover:text-red-600 p-2" title="Delete List">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                </button>
+                <div className="flex items-center gap-2">
+                     <button 
+                        onClick={() => onScoutList(activeList.items.map(i => i.name))}
+                        disabled={isScouting || activeList.items.length === 0}
+                        className={`flex items-center px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                            isScouting 
+                                ? 'bg-gray-100 dark:bg-gray-600 text-gray-400 cursor-wait' 
+                                : activeList.items.length === 0 
+                                    ? 'bg-gray-100 dark:bg-gray-600 text-gray-400 cursor-not-allowed'
+                                    : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/50'
+                        }`}
+                    >
+                        {isScouting ? (
+                            <>
+                                <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Scouting...
+                            </>
+                        ) : (
+                            <>
+                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                Scout Prices
+                            </>
+                        )}
+                    </button>
+                    <button onClick={() => deleteList(activeList.id)} className="text-red-400 hover:text-red-600 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg" title="Delete List">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                </div>
             </div>
 
             <div className="p-6">
@@ -259,14 +340,35 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
 
                 {/* Quick Add Section */}
                 <div className="mb-8">
-                  <h4 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
-                    {activeList.items.length === 0 ? "Quick Start: Popular Items" : "Quick Add"}
-                  </h4>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                      Quick Add
+                    </h4>
+                  </div>
+                  
+                  {/* Empty List Bundle Call-to-Action */}
+                  {activeList.items.length === 0 && (
+                    <div className="mb-4 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800 rounded-lg flex items-center justify-between">
+                        <div>
+                            <h5 className="font-bold text-emerald-800 dark:text-emerald-300">Start with Essentials?</h5>
+                            <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">
+                                Quickly add {ESSENTIALS_BUNDLE.join(', ')} to your list.
+                            </p>
+                        </div>
+                        <button 
+                            onClick={() => addItemsToActiveList(ESSENTIALS_BUNDLE)}
+                            className="bg-emerald-100 dark:bg-emerald-800 text-emerald-700 dark:text-emerald-200 px-4 py-2 rounded-md text-sm font-bold hover:bg-emerald-200 dark:hover:bg-emerald-700 transition-colors"
+                        >
+                            Add All
+                        </button>
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap gap-2">
-                    {SUGGESTED_ITEMS.map(item => (
+                    {currentSuggestions.map(item => (
                       <button
                         key={item.name}
-                        onClick={() => addItemToActiveList(item.name)}
+                        onClick={() => addItemsToActiveList([item.name])}
                         className="group flex items-center px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-full hover:border-emerald-400 hover:shadow-sm dark:hover:border-emerald-500 transition-all"
                       >
                         <span className="mr-2">{item.emoji}</span>
@@ -279,52 +381,73 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
                   </div>
                 </div>
 
-                <div className="space-y-2 border-t border-gray-100 dark:border-gray-700 pt-6">
-                    {activeList.items.length === 0 ? (
-                        <div className="text-center py-8">
-                           <p className="text-gray-400 dark:text-gray-500 italic">Your list is empty.</p>
-                        </div>
-                    ) : (
-                        activeList.items.map(item => (
-                            <div key={item.id} className="group flex items-center bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-3 rounded-lg hover:border-emerald-200 dark:hover:border-emerald-800 hover:shadow-sm transition-all">
-                                <input 
-                                    type="checkbox" 
-                                    checked={item.checked}
-                                    onChange={() => toggleItem(item.id)}
-                                    className="w-5 h-5 text-emerald-500 rounded border-gray-300 dark:border-gray-600 focus:ring-emerald-500 bg-white dark:bg-gray-700"
-                                />
-                                <div className="ml-3 flex-1">
-                                    <span className={`block font-medium ${item.checked ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-800 dark:text-gray-200'}`}>
-                                        {item.name}
-                                    </span>
-                                    {item.bestPrice ? (
-                                        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                                            Best: ${item.bestPrice} at {item.bestStore}
-                                        </span>
-                                    ) : (
-                                        <span className="text-xs text-gray-400 dark:text-gray-500">No price data yet</span>
-                                    )}
-                                </div>
-                                
-                                <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button 
-                                        onClick={() => onSearchItem(item.name)}
-                                        className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-full mr-1"
-                                        title="Search Prices"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                                    </button>
-                                    <button 
-                                        onClick={() => removeItem(item.id)}
-                                        className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full"
-                                        title="Remove"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                                    </button>
-                                </div>
+                <div className="border-t border-gray-100 dark:border-gray-700 pt-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <span className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Items</span>
+                    
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400 dark:text-gray-500">Sort by:</span>
+                        <select
+                            value={sortBy}
+                            onChange={(e) => setSortBy(e.target.value as SortOption)}
+                            className="text-sm border-none bg-transparent text-gray-600 dark:text-gray-300 focus:ring-0 cursor-pointer font-medium"
+                        >
+                            <option value="date-desc" className="dark:bg-gray-800">Date: Newest</option>
+                            <option value="date-asc" className="dark:bg-gray-800">Date: Oldest</option>
+                            <option value="name-asc" className="dark:bg-gray-800">Name: A-Z</option>
+                            <option value="price-asc" className="dark:bg-gray-800">Price: Low to High</option>
+                            <option value="price-desc" className="dark:bg-gray-800">Price: High to Low</option>
+                        </select>
+                    </div>
+                  </div>
+                
+                    <div className="space-y-2">
+                        {sortedItems.length === 0 ? (
+                            <div className="text-center py-8">
+                            <p className="text-gray-400 dark:text-gray-500 italic">Your list is empty.</p>
                             </div>
-                        ))
-                    )}
+                        ) : (
+                            sortedItems.map(item => (
+                                <div key={item.id} className="group flex items-center bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-3 rounded-lg hover:border-emerald-200 dark:hover:border-emerald-800 hover:shadow-sm transition-all">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={item.checked}
+                                        onChange={() => toggleItem(item.id)}
+                                        className="w-5 h-5 text-emerald-500 rounded border-gray-300 dark:border-gray-600 focus:ring-emerald-500 bg-white dark:bg-gray-700"
+                                    />
+                                    <div className="ml-3 flex-1">
+                                        <span className={`block font-medium ${item.checked ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-800 dark:text-gray-200'}`}>
+                                            {item.name}
+                                        </span>
+                                        {item.bestPrice ? (
+                                            <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                                                Best: ${item.bestPrice} at {item.bestStore}
+                                            </span>
+                                        ) : (
+                                            <span className="text-xs text-gray-400 dark:text-gray-500">No price data yet</span>
+                                        )}
+                                    </div>
+                                    
+                                    <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button 
+                                            onClick={() => onSearchItem(item.name)}
+                                            className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-full mr-1"
+                                            title="Search Prices"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                        </button>
+                                        <button 
+                                            onClick={() => removeItem(item.id)}
+                                            className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full"
+                                            title="Remove"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

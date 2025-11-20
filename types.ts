@@ -31,6 +31,7 @@ export interface ParsedPrice {
   store: string;
   price: number;
   productName?: string;
+  originalQuery?: string;
 }
 
 export interface SearchResult {

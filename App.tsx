@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { fetchGroceryPrices, identifyProductFromBarcode } from './services/geminiService';
+import { fetchGroceryPrices, identifyProductFromBarcode, fetchGroceryPricesForList } from './services/geminiService';
 import { GeoLocation, SearchResult, AppState, ProductHistory, ShoppingList, ShoppingListItem, User } from './types';
 import { ResultsView } from './components/ResultsView';
 import { ShoppingListView } from './components/ShoppingListView';
@@ -13,6 +13,7 @@ const App: React.FC = () => {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<SearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isScouting, setIsScouting] = useState(false);
   
   // Auth State
   const [user, setUser] = useState<User | null>(() => {
@@ -182,6 +183,44 @@ const App: React.FC = () => {
     } catch (err: any) {
       setError("Failed to fetch prices. Please try again. " + (err.message || ""));
       setState(AppState.ERROR);
+    }
+  };
+
+  const handleScoutList = async (items: string[]) => {
+    if (items.length === 0) return;
+    setIsScouting(true);
+    
+    try {
+        const prices = await fetchGroceryPricesForList(items, location);
+        
+        if (prices.length > 0) {
+            setShoppingLists(prevLists => prevLists.map(list => ({
+                ...list,
+                items: list.items.map(item => {
+                    // Find matching price update
+                    // We use originalQuery if available, otherwise fallback to name match
+                    const match = prices.find(p => 
+                        (p.originalQuery && p.originalQuery.toLowerCase() === item.name.toLowerCase()) || 
+                        (!p.originalQuery && item.name.toLowerCase().includes(p.productName?.toLowerCase() || ''))
+                    );
+
+                    if (match) {
+                        return {
+                            ...item,
+                            name: match.productName || item.name,
+                            bestPrice: match.price,
+                            bestStore: match.store
+                        };
+                    }
+                    return item;
+                })
+            })));
+        }
+    } catch (e) {
+        console.error("Bulk scout failed", e);
+        // Optionally show a toast or non-blocking error
+    } finally {
+        setIsScouting(false);
     }
   };
 
@@ -436,8 +475,11 @@ const App: React.FC = () => {
                 lists={shoppingLists} 
                 setLists={setShoppingLists}
                 onSearchItem={performSearch}
+                onScoutList={handleScoutList}
+                isScouting={isScouting}
                 user={user}
                 onLoginRequest={() => setShowAuthModal(true)}
+                knownItems={Object.keys(priceHistory)}
             />
         )}
       </main>
