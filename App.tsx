@@ -6,6 +6,8 @@ import { ResultsView } from './components/ResultsView';
 import { ShoppingListView } from './components/ShoppingListView';
 import { BarcodeScanner } from './components/BarcodeScanner';
 import { AuthModal } from './components/AuthModal';
+import { auth } from './services/firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>(AppState.IDLE);
@@ -14,7 +16,7 @@ const App: React.FC = () => {
   const [result, setResult] = useState<SearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isScouting, setIsScouting] = useState(false);
-  
+
   // Auth State
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('grocery_user');
@@ -47,7 +49,7 @@ const App: React.FC = () => {
   // Effect: Load data when User changes (Switch profile)
   useEffect(() => {
     const userSuffix = user ? `_${user.id}` : '_guest';
-    
+
     const savedLists = localStorage.getItem(`shoppingLists${userSuffix}`);
     setShoppingLists(savedLists ? JSON.parse(savedLists) : []);
 
@@ -75,6 +77,25 @@ const App: React.FC = () => {
     }
   }, [user]);
 
+  // Firebase Auth Listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        const appUser: User = {
+          id: firebaseUser.uid,
+          name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+          email: firebaseUser.email || '',
+          avatar: firebaseUser.photoURL || undefined
+        };
+        setUser(appUser);
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   // Request location on mount
   useEffect(() => {
     if (navigator.geolocation) {
@@ -101,22 +122,19 @@ const App: React.FC = () => {
   }, []); // Only run once
 
   const handleLogin = () => {
-    // Mock Login Logic
-    const mockUser: User = {
-      id: 'google_12345',
-      name: 'Demo User',
-      email: 'demo.user@gmail.com',
-      avatar: 'https://lh3.googleusercontent.com/a/default-user=s96-c' // Dummy avatar
-    };
-    setUser(mockUser);
     setShowAuthModal(false);
   };
 
-  const handleLogout = () => {
-    setUser(null);
-    setState(AppState.READY);
-    setQuery('');
-    setResult(null);
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setUser(null);
+      setState(AppState.READY);
+      setQuery('');
+      setResult(null);
+    } catch (error) {
+      console.error("Error signing out", error);
+    }
   };
 
   const updatePriceHistory = (productName: string, newData: SearchResult) => {
@@ -124,10 +142,10 @@ const App: React.FC = () => {
 
     const today = new Date().toISOString().split('T')[0];
     const key = productName.toLowerCase().trim();
-    
+
     setPriceHistory(prev => {
       const productHist = prev[key] || {};
-      
+
       newData.parsedPrices!.forEach(pp => {
         if (!productHist[pp.store]) {
           productHist[pp.store] = [];
@@ -137,7 +155,7 @@ const App: React.FC = () => {
         if (!existingToday) {
           productHist[pp.store].push({ date: today, price: pp.price });
         } else {
-            existingToday.price = pp.price; // Update if re-searched
+          existingToday.price = pp.price; // Update if re-searched
         }
       });
 
@@ -191,50 +209,50 @@ const App: React.FC = () => {
   const handleScoutList = async (items: string[]) => {
     if (items.length === 0) return;
     setIsScouting(true);
-    
+
     try {
-        const prices = await fetchGroceryPricesForList(items, location);
-        
-        if (prices.length > 0) {
-            setShoppingLists(prevLists => prevLists.map(list => ({
-                ...list,
-                items: list.items.map(item => {
-                    // Find matching price update with robust matching
-                    const match = prices.find(p => {
-                        const query = p.originalQuery?.toLowerCase().trim();
-                        const itemName = item.name.toLowerCase().trim();
-                        
-                        // 1. Exact match on originalQuery
-                        if (query === itemName) return true;
-                        
-                        // 2. Containment match on originalQuery (e.g. "eggs" matches "large eggs")
-                        if (query && (itemName.includes(query) || query.includes(itemName))) return true;
+      const prices = await fetchGroceryPricesForList(items, location);
 
-                        // 3. Fallback: Product name contains item name (e.g. "Lucerne Milk" contains "Milk")
-                        if (p.productName?.toLowerCase().includes(itemName)) return true;
+      if (prices.length > 0) {
+        setShoppingLists(prevLists => prevLists.map(list => ({
+          ...list,
+          items: list.items.map(item => {
+            // Find matching price update with robust matching
+            const match = prices.find(p => {
+              const query = p.originalQuery?.toLowerCase().trim();
+              const itemName = item.name.toLowerCase().trim();
 
-                        return false;
-                    });
+              // 1. Exact match on originalQuery
+              if (query === itemName) return true;
 
-                    if (match) {
-                        return {
-                            ...item,
-                            name: match.productName || item.name,
-                            bestPrice: match.price,
-                            bestStore: match.store
-                        };
-                    }
-                    return item;
-                })
-            })));
-        } else {
-            alert("No price data found for these items. Try searching for them individually.");
-        }
+              // 2. Containment match on originalQuery (e.g. "eggs" matches "large eggs")
+              if (query && (itemName.includes(query) || query.includes(itemName))) return true;
+
+              // 3. Fallback: Product name contains item name (e.g. "Lucerne Milk" contains "Milk")
+              if (p.productName?.toLowerCase().includes(itemName)) return true;
+
+              return false;
+            });
+
+            if (match) {
+              return {
+                ...item,
+                name: match.productName || item.name,
+                bestPrice: match.price,
+                bestStore: match.store
+              };
+            }
+            return item;
+          })
+        })));
+      } else {
+        alert("No price data found for these items. Try searching for them individually.");
+      }
     } catch (e: any) {
-        console.error("Bulk scout failed", e);
-        alert("Failed to scout prices. Please try again.");
+      console.error("Bulk scout failed", e);
+      alert("Failed to scout prices. Please try again.");
     } finally {
-        setIsScouting(false);
+      setIsScouting(false);
     }
   };
 
@@ -246,54 +264,54 @@ const App: React.FC = () => {
   const handleBarcodeScan = async (code: string) => {
     setState(AppState.SEARCHING); // Show loading immediately
     try {
-        // First, identify the product
-        const identifiedName = await identifyProductFromBarcode(code);
-        // Then, search for it
-        performSearch(identifiedName);
+      // First, identify the product
+      const identifiedName = await identifyProductFromBarcode(code);
+      // Then, search for it
+      performSearch(identifiedName);
     } catch (err: any) {
-        console.error("Barcode scan failed:", err);
-        setError(err.message || "Could not identify product from barcode. Please try searching by name.");
-        setState(AppState.ERROR);
+      console.error("Barcode scan failed:", err);
+      setError(err.message || "Could not identify product from barcode. Please try searching by name.");
+      setState(AppState.ERROR);
     }
   };
 
   const handleAddToList = (itemName: string, price?: number, store?: string) => {
     if (shoppingLists.length === 0) {
-        const defaultList: ShoppingList = {
-            id: Date.now().toString(),
-            name: 'My Grocery List',
-            items: [],
-            createdAt: Date.now()
-        };
-        
-        const newItem: ShoppingListItem = {
-            id: Date.now().toString(),
-            name: itemName,
-            checked: false,
-            addedAt: Date.now(),
-            bestPrice: price,
-            bestStore: store
-        };
-        defaultList.items.push(newItem);
-        setShoppingLists([defaultList]);
+      const defaultList: ShoppingList = {
+        id: Date.now().toString(),
+        name: 'My Grocery List',
+        items: [],
+        createdAt: Date.now()
+      };
+
+      const newItem: ShoppingListItem = {
+        id: Date.now().toString(),
+        name: itemName,
+        checked: false,
+        addedAt: Date.now(),
+        bestPrice: price,
+        bestStore: store
+      };
+      defaultList.items.push(newItem);
+      setShoppingLists([defaultList]);
     } else {
-        setShoppingLists(prev => {
-            const targetList = prev[0]; 
-            const newItem: ShoppingListItem = {
-                id: Date.now().toString(),
-                name: itemName,
-                checked: false,
-                addedAt: Date.now(),
-                bestPrice: price,
-                bestStore: store
-            };
-            
-            const newLists = [...prev];
-            newLists[0] = { ...targetList, items: [...targetList.items, newItem] };
-            return newLists;
-        });
+      setShoppingLists(prev => {
+        const targetList = prev[0];
+        const newItem: ShoppingListItem = {
+          id: Date.now().toString(),
+          name: itemName,
+          checked: false,
+          addedAt: Date.now(),
+          bestPrice: price,
+          bestStore: store
+        };
+
+        const newLists = [...prev];
+        newLists[0] = { ...targetList, items: [...targetList.items, newItem] };
+        return newLists;
+      });
     }
-    
+
     alert(`Added "${itemName}" to ${shoppingLists[0]?.name || 'list'}`);
   };
 
@@ -328,42 +346,42 @@ const App: React.FC = () => {
             className="w-full pl-6 pr-24 py-5 text-lg rounded-full border-2 border-emerald-100 dark:border-emerald-800/50 shadow-lg focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/20 outline-none transition-all dark:bg-gray-800 dark:text-white dark:placeholder-gray-500"
             disabled={state === AppState.LOCATING}
           />
-          
+
           <div className="absolute right-2 top-2 bottom-2 flex gap-1">
-             <button
-                type="button"
-                onClick={() => setState(AppState.SCANNING)}
-                className="p-3 text-gray-500 dark:text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-gray-700 rounded-full transition-colors z-20 relative pointer-events-auto"
-                title="Scan Barcode"
-             >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
-             </button>
-             <button
-                type="submit"
-                disabled={state === AppState.LOCATING || !query.trim()}
-                className="bg-emerald-500 hover:bg-emerald-600 text-white p-3 rounded-full font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-             >
-                {state === AppState.LOCATING ? (
-                    <svg className="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                ) : (
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            <button
+              type="button"
+              onClick={() => setState(AppState.SCANNING)}
+              className="p-3 text-gray-500 dark:text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-gray-700 rounded-full transition-colors z-20 relative pointer-events-auto"
+              title="Scan Barcode"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
+            </button>
+            <button
+              type="submit"
+              disabled={state === AppState.LOCATING || !query.trim()}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white p-3 rounded-full font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+            >
+              {state === AppState.LOCATING ? (
+                <svg className="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                )}
-             </button>
+              ) : (
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              )}
+            </button>
           </div>
         </div>
       </form>
-      
+
       <div className="mt-8 flex gap-4">
-        <button 
-            onClick={() => setState(AppState.LISTS)}
-            className="flex items-center text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-gray-800 hover:bg-emerald-100 dark:hover:bg-gray-700 px-6 py-3 rounded-lg font-medium transition-colors"
+        <button
+          onClick={() => setState(AppState.LISTS)}
+          className="flex items-center text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-gray-800 hover:bg-emerald-100 dark:hover:bg-gray-700 px-6 py-3 rounded-lg font-medium transition-colors"
         >
-            <span className="mr-2">📝</span> View Shopping Lists
+          <span className="mr-2">📝</span> View Shopping Lists
         </button>
       </div>
     </div>
@@ -387,7 +405,7 @@ const App: React.FC = () => {
         <div className="text-4xl mb-4">😕</div>
         <h3 className="text-xl font-bold text-red-800 dark:text-red-400 mb-2">Something went wrong</h3>
         <p className="text-red-600 dark:text-red-300 mb-6">{error}</p>
-        <button 
+        <button
           onClick={handleReset}
           className="bg-white dark:bg-gray-800 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 px-6 py-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/30 font-medium transition-colors"
         >
@@ -402,64 +420,64 @@ const App: React.FC = () => {
       {/* Navbar */}
       <nav className="p-4 sm:p-6 flex justify-between items-center max-w-6xl mx-auto w-full z-20">
         <div className="flex items-center space-x-2 text-emerald-700 dark:text-emerald-400 font-bold text-xl cursor-pointer" onClick={handleReset}>
-           <span>🥬</span> <span className="hidden sm:inline">GroceryScout</span>
+          <span>🥬</span> <span className="hidden sm:inline">GroceryScout</span>
         </div>
-        
+
         <div className="flex items-center gap-3 sm:gap-6">
-            {location && (
+          {location && (
             <div className="hidden md:flex items-center text-xs font-medium bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 px-3 py-1 rounded-full">
-                <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-                Location Active
+              <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" /></svg>
+              Location Active
             </div>
-            )}
-            
-             {/* Dark Mode Toggle */}
-             <button
-              onClick={() => setIsDarkMode(!isDarkMode)}
-              className="p-2 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-yellow-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-              title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
-            >
-              {isDarkMode ? (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                </svg>
-              )}
-            </button>
+          )}
 
-            <button 
-                onClick={() => setState(AppState.LISTS)} 
-                className={`text-sm font-medium ${state === AppState.LISTS ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400'}`}
-            >
-                Lists
-            </button>
-
-            {user ? (
-              <div className="flex items-center gap-3 pl-3 border-l border-gray-200 dark:border-gray-700">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-emerald-200 dark:bg-emerald-800 flex items-center justify-center text-emerald-800 dark:text-emerald-200 font-bold text-xs overflow-hidden">
-                    {user.avatar ? <img src={user.avatar} alt={user.name} className="w-full h-full" /> : user.name[0]}
-                  </div>
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200 hidden sm:inline">{user.name}</span>
-                </div>
-                <button 
-                  onClick={handleLogout}
-                  className="text-xs text-gray-400 hover:text-red-500 font-medium"
-                >
-                  Sign Out
-                </button>
-              </div>
+          {/* Dark Mode Toggle */}
+          <button
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className="p-2 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-yellow-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+            title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          >
+            {isDarkMode ? (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
             ) : (
-              <button 
-                onClick={() => setShowAuthModal(true)}
-                className="bg-white dark:bg-gray-800 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-700 px-4 py-1.5 rounded-full text-sm font-bold hover:bg-emerald-50 dark:hover:bg-gray-700 transition-colors"
-              >
-                Sign In
-              </button>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+              </svg>
             )}
+          </button>
+
+          <button
+            onClick={() => setState(AppState.LISTS)}
+            className={`text-sm font-medium ${state === AppState.LISTS ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400'}`}
+          >
+            Lists
+          </button>
+
+          {user ? (
+            <div className="flex items-center gap-3 pl-3 border-l border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-emerald-200 dark:bg-emerald-800 flex items-center justify-center text-emerald-800 dark:text-emerald-200 font-bold text-xs overflow-hidden">
+                  {user.avatar ? <img src={user.avatar} alt={user.name} className="w-full h-full" /> : user.name[0]}
+                </div>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-200 hidden sm:inline">{user.name}</span>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="text-xs text-gray-400 hover:text-red-500 font-medium"
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className="bg-white dark:bg-gray-800 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-700 px-4 py-1.5 rounded-full text-sm font-bold hover:bg-emerald-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              Sign In
+            </button>
+          )}
         </div>
       </nav>
 
@@ -468,33 +486,33 @@ const App: React.FC = () => {
         {(state === AppState.IDLE || state === AppState.READY || state === AppState.LOCATING) && renderHero()}
         {state === AppState.SEARCHING && renderLoading()}
         {state === AppState.RESULTS && result && (
-            <ResultsView 
-                result={result} 
-                onReset={handleReset} 
-                history={priceHistory[result.productName?.toLowerCase() || '']}
-                onAddToList={handleAddToList}
-                lists={shoppingLists}
-                isDarkMode={isDarkMode}
-            />
+          <ResultsView
+            result={result}
+            onReset={handleReset}
+            history={priceHistory[result.productName?.toLowerCase() || '']}
+            onAddToList={handleAddToList}
+            lists={shoppingLists}
+            isDarkMode={isDarkMode}
+          />
         )}
         {state === AppState.ERROR && renderError()}
         {state === AppState.SCANNING && (
-            <BarcodeScanner 
-                onScan={handleBarcodeScan} 
-                onClose={() => setState(AppState.READY)} 
-            />
+          <BarcodeScanner
+            onScan={handleBarcodeScan}
+            onClose={() => setState(AppState.READY)}
+          />
         )}
         {state === AppState.LISTS && (
-            <ShoppingListView 
-                lists={shoppingLists} 
-                setLists={setShoppingLists}
-                onSearchItem={performSearch}
-                onScoutList={handleScoutList}
-                isScouting={isScouting}
-                user={user}
-                onLoginRequest={() => setShowAuthModal(true)}
-                knownItems={Object.keys(priceHistory)}
-            />
+          <ShoppingListView
+            lists={shoppingLists}
+            setLists={setShoppingLists}
+            onSearchItem={performSearch}
+            onScoutList={handleScoutList}
+            isScouting={isScouting}
+            user={user}
+            onLoginRequest={() => setShowAuthModal(true)}
+            knownItems={Object.keys(priceHistory)}
+          />
         )}
       </main>
 
@@ -505,9 +523,9 @@ const App: React.FC = () => {
 
       {/* Modals */}
       {showAuthModal && (
-        <AuthModal 
-          onLogin={handleLogin} 
-          onClose={() => setShowAuthModal(false)} 
+        <AuthModal
+          onLogin={handleLogin}
+          onClose={() => setShowAuthModal(false)}
         />
       )}
     </div>
