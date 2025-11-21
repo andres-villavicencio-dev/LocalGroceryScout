@@ -58,6 +58,9 @@ export interface User {
   name: string;
   email: string;
   avatar?: string;
+  isPro?: boolean;
+  dailySearches?: number;
+  lastSearchDate?: string;
 }
 
 // Shopping List Types

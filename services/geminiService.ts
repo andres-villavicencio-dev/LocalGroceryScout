@@ -15,11 +15,11 @@ const parsePriceData = (text: string): ParsedPrice[] => {
     // Look for the specific marker
     const marker = "---PRICE_DATA---";
     const parts = text.split(marker);
-    
+
     if (parts.length > 1) {
       const dataBlock = parts[1].trim();
       const lines = dataBlock.split('\n');
-      
+
       for (const line of lines) {
         // Format: Store|Price|ProductName|OriginalQuery(optional)
         const [store, priceStr, productName, originalQuery] = line.split('|').map(s => s.trim());
@@ -27,8 +27,8 @@ const parsePriceData = (text: string): ParsedPrice[] => {
           // Clean price string (remove currency symbols, approx, etc)
           const priceVal = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
           if (!isNaN(priceVal)) {
-            prices.push({ 
-              store, 
+            prices.push({
+              store,
               price: priceVal,
               productName: productName || undefined,
               originalQuery: originalQuery || undefined
@@ -62,7 +62,7 @@ export const identifyProductFromBarcode = async (barcode: string): Promise<strin
   // 2. Fallback to Gemini with Search Grounding
   if (!API_KEY) throw new Error("API Key not found");
   const ai = new GoogleGenAI({ apiKey: API_KEY });
-  
+
   const prompt = `
     I have a barcode number: ${barcode}. 
     Search the web to identify the exact product name and brand.
@@ -78,9 +78,9 @@ export const identifyProductFromBarcode = async (barcode: string): Promise<strin
       tools: [{ googleSearch: {} }]
     }
   });
-  
+
   const text = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-  
+
   // Validation: if text is too long (likely an explanation) or indicates failure
   if (!text || text.length > 80 || text.toUpperCase().includes("UNKNOWN") || text.toLowerCase().includes("unable to")) {
     throw new Error("Product could not be identified from barcode.");
@@ -104,13 +104,13 @@ export const fetchGroceryPrices = async (
 
   const toolConfig = location
     ? {
-        retrievalConfig: {
-          latLng: {
-            latitude: location.latitude,
-            longitude: location.longitude,
-          },
+      retrievalConfig: {
+        latLng: {
+          latitude: location.latitude,
+          longitude: location.longitude,
         },
-      }
+      },
+    }
     : undefined;
 
   const prompt = `
@@ -155,7 +155,7 @@ export const fetchGroceryPrices = async (
 
     // Parse the structured data for our charts/history
     const parsedPrices = parsePriceData(fullText);
-    
+
     // Remove the technical data block from the display text
     const displayText = fullText.split('---PRICE_DATA---')[0];
 
@@ -191,6 +191,11 @@ export const fetchGroceryPricesForList = async (
     
     Find the current best prices for each of these items at nearby grocery stores.
     
+    CRITICAL INSTRUCTION:
+    You MUST return a separator line "---PRICE_DATA---" followed by the price list.
+    If you cannot find exact real-time prices, you MUST provide realistic ESTIMATES based on typical prices for that store.
+    DO NOT return an apology or an empty response. ALWAYS return the data block.
+    
     CRITICAL OUTPUT FORMAT:
     Return ONLY a separator line "---PRICE_DATA---" followed by a list of the best price found for each item.
     Format each line as: "Store Name|Price|Specific Product Found|Original List Item Name".
@@ -214,10 +219,12 @@ export const fetchGroceryPricesForList = async (
     });
 
     const text = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    return parsePriceData(text);
+    console.log("Raw Gemini Response for List:", text);
+    const parsed = parsePriceData(text);
+    console.log("Parsed Data:", parsed);
+    return parsed;
   } catch (error) {
     console.error("Error fetching list prices:", error);
-    // Return empty array on failure so app doesn't crash, just shows no updates
-    return [];
+    throw error;
   }
 };

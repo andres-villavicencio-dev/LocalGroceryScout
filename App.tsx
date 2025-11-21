@@ -6,10 +6,16 @@ import { ResultsView } from './components/ResultsView';
 import { ShoppingListView } from './components/ShoppingListView';
 import { BarcodeScanner } from './components/BarcodeScanner';
 import { AuthModal } from './components/AuthModal';
+import { AdBanner } from './components/AdBanner';
+import { UpgradeModal } from './components/UpgradeModal';
 import { auth } from './services/firebase';
+import { saveUserData, getUserData, saveShoppingLists, getShoppingLists, savePriceHistory, getPriceHistory } from './services/firestoreService';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { ToastProvider, useToast } from './contexts/ToastContext';
+import { ToastContainer } from './components/ToastContainer';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
+  const { addToast } = useToast();
   const [state, setState] = useState<AppState>(AppState.IDLE);
   const [location, setLocation] = useState<GeoLocation | undefined>(undefined);
   const [query, setQuery] = useState('');
@@ -23,6 +29,31 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
+  // Monetization State (Local for guest, synced for user)
+  const [isPro, setIsPro] = useState(() => {
+    return localStorage.getItem('grocery_is_pro') === 'true';
+  });
+  const [dailySearches, setDailySearches] = useState(() => {
+    const saved = localStorage.getItem('grocery_daily_searches');
+    if (saved) {
+      const { count, date } = JSON.parse(saved);
+      if (date === new Date().toISOString().split('T')[0]) {
+        return count;
+      }
+    }
+    return 0;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('grocery_is_pro', String(isPro));
+  }, [isPro]);
+
+  useEffect(() => {
+    const date = new Date().toISOString().split('T')[0];
+    localStorage.setItem('grocery_daily_searches', JSON.stringify({ count: dailySearches, date }));
+  }, [dailySearches]);
 
   // Dark Mode State
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -45,6 +76,7 @@ const App: React.FC = () => {
   // Data Persistence - State holders
   const [shoppingLists, setShoppingLists] = useState<ShoppingList[]>([]);
   const [priceHistory, setPriceHistory] = useState<Record<string, ProductHistory>>({});
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   // Effect: Load data when User changes (Switch profile)
   useEffect(() => {
@@ -61,12 +93,24 @@ const App: React.FC = () => {
   useEffect(() => {
     const userSuffix = user ? `_${user.id}` : '_guest';
     localStorage.setItem(`shoppingLists${userSuffix}`, JSON.stringify(shoppingLists));
-  }, [shoppingLists, user]);
+
+    // Sync to Firestore if logged in
+    // Sync to Firestore if logged in
+    if (user && user.id && isDataLoaded) {
+      saveShoppingLists(user.id, shoppingLists);
+    }
+  }, [shoppingLists, user, isDataLoaded]);
 
   useEffect(() => {
     const userSuffix = user ? `_${user.id}` : '_guest';
     localStorage.setItem(`priceHistory${userSuffix}`, JSON.stringify(priceHistory));
-  }, [priceHistory, user]);
+
+    // Sync to Firestore if logged in
+    // Sync to Firestore if logged in
+    if (user && user.id && isDataLoaded) {
+      savePriceHistory(user.id, priceHistory);
+    }
+  }, [priceHistory, user, isDataLoaded]);
 
   // Save user session
   useEffect(() => {
@@ -79,17 +123,52 @@ const App: React.FC = () => {
 
   // Firebase Auth Listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        // 1. Fetch extended user data from Firestore
+        const firestoreUser = await getUserData(firebaseUser.uid);
+
         const appUser: User = {
           id: firebaseUser.uid,
           name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
           email: firebaseUser.email || '',
-          avatar: firebaseUser.photoURL || undefined
+          avatar: firebaseUser.photoURL || undefined,
+          isPro: firestoreUser?.isPro || isPro, // Prefer Firestore, fallback to local
+          dailySearches: firestoreUser?.dailySearches || 0,
+          lastSearchDate: firestoreUser?.lastSearchDate || new Date().toISOString().split('T')[0]
         };
+
         setUser(appUser);
+        setIsPro(appUser.isPro || false); // Update local state to match cloud
+
+        // 2. Load Data from Firestore
+        const cloudLists = await getShoppingLists(firebaseUser.uid);
+        const cloudHistory = await getPriceHistory(firebaseUser.uid);
+
+        if (cloudLists.length > 0) {
+          setShoppingLists(cloudLists);
+        } else {
+          // First time sync? If we have local guest data, maybe we should upload it?
+          // For now, let's just keep the local data which will be saved to cloud by the useEffects
+          console.log("No cloud lists found, syncing local...");
+        }
+
+        if (Object.keys(cloudHistory).length > 0) {
+          setPriceHistory(cloudHistory);
+        }
+
+        // 3. Save latest profile data
+        saveUserData(appUser);
+
+        // Data loading complete
+        setIsDataLoaded(true);
+
       } else {
         setUser(null);
+        setIsDataLoaded(true); // Guest mode is "loaded" immediately (from local storage)
+        // Reset to guest defaults or keep last known? 
+        // Better to clear sensitive info, but maybe keep local guest data if it existed before login?
+        // For simplicity, we rely on the 'user' effect to switch back to '_guest' storage key.
       }
     });
 
@@ -189,6 +268,14 @@ const App: React.FC = () => {
 
   const performSearch = async (searchQuery: string) => {
     if (!searchQuery.trim()) return;
+
+    // Check Limits
+    if (!isPro && dailySearches >= 5) {
+      setShowUpgradeModal(true);
+      return;
+    }
+
+    setDailySearches(prev => prev + 1);
     setQuery(searchQuery);
     setState(AppState.SEARCHING);
     setError(null);
@@ -201,7 +288,9 @@ const App: React.FC = () => {
       updateListItemsWithPrice(searchQuery, data);
       setState(AppState.RESULTS);
     } catch (err: any) {
-      setError("Failed to fetch prices. Please try again. " + (err.message || ""));
+      const msg = "Failed to fetch prices. Please try again. " + (err.message || "");
+      setError(msg);
+      addToast(msg, 'error');
       setState(AppState.ERROR);
     }
   };
@@ -246,11 +335,11 @@ const App: React.FC = () => {
           })
         })));
       } else {
-        alert("No price data found for these items. Try searching for them individually.");
+        addToast("No price data found for these items. Try searching for them individually.", 'warning');
       }
     } catch (e: any) {
       console.error("Bulk scout failed", e);
-      alert("Failed to scout prices. Please try again.");
+      addToast(`Failed to scout prices: ${e.message || "Unknown error"}`, 'error');
     } finally {
       setIsScouting(false);
     }
@@ -270,7 +359,9 @@ const App: React.FC = () => {
       performSearch(identifiedName);
     } catch (err: any) {
       console.error("Barcode scan failed:", err);
-      setError(err.message || "Could not identify product from barcode. Please try searching by name.");
+      const msg = err.message || "Could not identify product from barcode. Please try searching by name.";
+      setError(msg);
+      addToast(msg, 'error');
       setState(AppState.ERROR);
     }
   };
@@ -312,7 +403,7 @@ const App: React.FC = () => {
       });
     }
 
-    alert(`Added "${itemName}" to ${shoppingLists[0]?.name || 'list'}`);
+    addToast(`Added "${itemName}" to ${shoppingLists[0]?.name || 'list'}`, 'success');
   };
 
   const handleReset = () => {
@@ -417,6 +508,8 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-950 flex flex-col transition-colors duration-300">
+      <ToastContainer />
+      <AdBanner isPro={isPro} />
       {/* Navbar */}
       <nav className="p-4 sm:p-6 flex justify-between items-center max-w-6xl mx-auto w-full z-20">
         <div className="flex items-center space-x-2 text-emerald-700 dark:text-emerald-400 font-bold text-xl cursor-pointer" onClick={handleReset}>
@@ -528,7 +621,25 @@ const App: React.FC = () => {
           onClose={() => setShowAuthModal(false)}
         />
       )}
+
+      <UpgradeModal
+        isOpen={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+        onUpgrade={() => {
+          setIsPro(true);
+          setShowUpgradeModal(false);
+          addToast("Welcome to Pro! You now have unlimited searches.", 'success');
+        }}
+      />
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 };
 
