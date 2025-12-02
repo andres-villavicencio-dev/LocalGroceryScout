@@ -82,7 +82,7 @@ export interface ShoppingList {
 
 // Price History Types
 export interface PricePoint {
-  date: string; // ISO date string YYYY-MM-DD
+  date: string; // ISO date string YYYY-MM-DDTHH:00
   price: number;
 }
 

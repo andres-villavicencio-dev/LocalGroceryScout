@@ -1,8 +1,9 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ShoppingList, ShoppingListItem, User } from '../types';
 import { BarcodeScanner } from './BarcodeScanner';
 import { identifyProductFromBarcode } from '../services/geminiService';
+import { PriceHistoryChart } from './PriceHistoryChart';
 
 interface ShoppingListViewProps {
   lists: ShoppingList[];
@@ -13,6 +14,7 @@ interface ShoppingListViewProps {
   user: User | null;
   onLoginRequest: () => void;
   knownItems?: string[];
+  priceHistory?: Record<string, any>; // Using any for now to avoid deep type imports if not needed, or import ProductHistory
 }
 
 const SUGGESTED_ITEMS = [
@@ -36,13 +38,25 @@ const ESSENTIALS_BUNDLE = ['Milk', 'Eggs', 'Bread', 'Bananas'];
 
 type SortOption = 'name-asc' | 'date-desc' | 'date-asc' | 'price-asc' | 'price-desc';
 
-export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLists, onSearchItem, onScoutList, isScouting, user, onLoginRequest, knownItems }) => {
+export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLists, onSearchItem, onScoutList, isScouting, user, onLoginRequest, knownItems, priceHistory }) => {
   const [activeListId, setActiveListId] = useState<string>(lists.length > 0 ? lists[0].id : '');
   const [newItemName, setNewItemName] = useState('');
   const [newListName, setNewListName] = useState('');
   const [isCreatingList, setIsCreatingList] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState<string | null>(null);
+
+  // Track last visit for highlighting new items
+  const [lastVisit] = useState(() => {
+    const stored = localStorage.getItem('grocery_last_visit');
+    return stored ? parseInt(stored, 10) : 0;
+  });
+
+  useEffect(() => {
+    // Update last visit time on mount
+    localStorage.setItem('grocery_last_visit', Date.now().toString());
+  }, []);
 
   // Ensure we have a valid active list
   const activeList = lists.find(l => l.id === activeListId) || (lists.length > 0 ? lists[0] : undefined);
@@ -460,45 +474,55 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
                           </div>
 
                           <div className="space-y-2">
-                            {items.map(item => (
-                              <div key={item.id} className="group flex items-center bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-3 rounded-lg hover:border-emerald-200 dark:hover:border-emerald-800 hover:shadow-sm transition-all">
-                                <input
-                                  type="checkbox"
-                                  checked={item.checked}
-                                  onChange={() => toggleItem(item.id)}
-                                  className="w-5 h-5 text-emerald-500 rounded border-gray-300 dark:border-gray-600 focus:ring-emerald-500 bg-white dark:bg-gray-700"
-                                />
-                                <div className="ml-3 flex-1">
-                                  <span className={`block font-medium ${item.checked ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-800 dark:text-gray-200'}`}>
-                                    {item.name}
-                                  </span>
-                                  {item.bestPrice ? (
-                                    <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                                      ${item.bestPrice.toFixed(2)}
+                            {items.map(item => {
+                              console.log('Rendering item:', item.name, item.bestStore);
+                              return (
+                                <div key={item.id} className={`group flex items-center bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-3 rounded-lg hover:border-emerald-200 dark:hover:border-emerald-800 hover:shadow-sm transition-all ${item.addedAt > lastVisit ? 'bg-emerald-50 dark:bg-emerald-900/10' : ''}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={item.checked}
+                                    onChange={() => toggleItem(item.id)}
+                                    className="w-5 h-5 text-emerald-500 rounded border-gray-300 dark:border-gray-600 focus:ring-emerald-500 bg-white dark:bg-gray-700"
+                                  />
+                                  <div className="ml-3 flex-1">
+                                    <span className={`block font-medium ${item.checked ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-800 dark:text-gray-200'}`}>
+                                      {item.name}
                                     </span>
-                                  ) : (
-                                    <span className="text-xs text-gray-400 dark:text-gray-500">No price data</span>
-                                  )}
-                                </div>
+                                    {item.bestPrice ? (
+                                      <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                                        ${item.bestPrice.toFixed(2)}
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-gray-400 dark:text-gray-500">No price data</span>
+                                    )}
+                                  </div>
 
-                                <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button
-                                    onClick={() => onSearchItem(item.name)}
-                                    className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-full mr-1"
-                                    title="Search Prices"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                                  </button>
-                                  <button
-                                    onClick={() => removeItem(item.id)}
-                                    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full"
-                                    title="Remove"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                                  </button>
+                                  <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                      onClick={() => onSearchItem(item.name)}
+                                      className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-full mr-1"
+                                      title="Search Prices"
+                                    >
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                    </button>
+                                    <button
+                                      onClick={() => setSelectedHistoryItem(item.name)}
+                                      className="p-2 text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-full mr-1"
+                                      title="View Price History"
+                                    >
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg>
+                                    </button>
+                                    <button
+                                      onClick={() => removeItem(item.id)}
+                                      className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full"
+                                      title="Remove"
+                                    >
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                    </button>
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       );
@@ -516,6 +540,32 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
           onScan={handleBarcodeScan}
           onClose={() => setShowScanner(false)}
         />
+      )}
+
+      {selectedHistoryItem && priceHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setSelectedHistoryItem(null)}>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Price History: {selectedHistoryItem}</h3>
+              <button onClick={() => setSelectedHistoryItem(null)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {priceHistory[selectedHistoryItem.toLowerCase()] ? (
+              <PriceHistoryChart
+                history={priceHistory[selectedHistoryItem.toLowerCase()]}
+                productName={selectedHistoryItem}
+                isDarkMode={document.documentElement.classList.contains('dark')}
+              />
+            ) : (
+              <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+                <p>No price history available for this item yet.</p>
+                <p className="text-sm mt-2">Try scouting prices to build history!</p>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

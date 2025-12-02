@@ -219,26 +219,54 @@ const AppContent: React.FC = () => {
   const updatePriceHistory = (productName: string, newData: SearchResult) => {
     if (!newData.parsedPrices || newData.parsedPrices.length === 0) return;
 
-    const today = new Date().toISOString().split('T')[0];
-    const key = productName.toLowerCase().trim();
+    // Use ISO string with hour precision: YYYY-MM-DDTHH:00
+    const now = new Date();
+    const currentHourKey = `${now.toISOString().slice(0, 13)}:00`;
+
+    const queryKey = productName.toLowerCase().trim();
+    const productKey = newData.productName?.toLowerCase().trim();
 
     setPriceHistory(prev => {
-      const productHist = prev[key] || {};
+      const newHistory = { ...prev };
+
+      // Helper to update history for a specific key
+      const updateForKey = (key: string, pricePoint: { date: string, price: number, store: string }) => {
+        const currentProductHistory = { ...(newHistory[key] || {}) };
+
+        if (!currentProductHistory[pricePoint.store]) {
+          currentProductHistory[pricePoint.store] = [];
+        } else {
+          currentProductHistory[pricePoint.store] = [...currentProductHistory[pricePoint.store]];
+        }
+
+        const existingHourIndex = currentProductHistory[pricePoint.store].findIndex(p => p.date === currentHourKey);
+
+        if (existingHourIndex === -1) {
+          currentProductHistory[pricePoint.store].push({ date: currentHourKey, price: pricePoint.price });
+        } else {
+          const newPoints = [...currentProductHistory[pricePoint.store]];
+          newPoints[existingHourIndex] = { ...newPoints[existingHourIndex], price: pricePoint.price };
+          currentProductHistory[pricePoint.store] = newPoints;
+        }
+        newHistory[key] = currentProductHistory;
+      };
 
       newData.parsedPrices!.forEach(pp => {
-        if (!productHist[pp.store]) {
-          productHist[pp.store] = [];
-        }
-        // Check if we already have a price for today to avoid duplicates
-        const existingToday = productHist[pp.store].find(p => p.date === today);
-        if (!existingToday) {
-          productHist[pp.store].push({ date: today, price: pp.price });
-        } else {
-          existingToday.price = pp.price; // Update if re-searched
+        const point = { date: currentHourKey, price: pp.price, store: pp.store };
+
+        // 1. Save under the search query
+        updateForKey(queryKey, point);
+
+        // 2. Save under the specific product name found (if different)
+        if (pp.productName) {
+          const specificProductKey = pp.productName.toLowerCase().trim();
+          if (specificProductKey !== queryKey) {
+            updateForKey(specificProductKey, point);
+          }
         }
       });
 
-      return { ...prev, [key]: productHist };
+      return newHistory;
     });
   };
 
@@ -268,6 +296,34 @@ const AppContent: React.FC = () => {
 
   const performSearch = async (searchQuery: string) => {
     if (!searchQuery.trim()) return;
+
+    // DEBUG: Seed Data
+    if (searchQuery.trim() === 'debug:seed') {
+      const today = new Date();
+      const testProduct = "Test Product";
+      const testStore = "Debug Store";
+      const history: ProductHistory = {
+        [testStore]: Array.from({ length: 7 }).map((_, i) => {
+          const d = new Date(today);
+          d.setDate(d.getDate() - (6 - i));
+          return {
+            date: `${d.toISOString().slice(0, 13)}:00`,
+            price: 10 + Math.random() * 5,
+            store: testStore
+          };
+        })
+      };
+
+      setPriceHistory(prev => ({
+        ...prev,
+        [testProduct.toLowerCase()]: history
+      }));
+
+      handleAddToList(testProduct, history[testStore][6].price, testStore);
+      addToast("Debug data seeded! Check 'Test Product' in your list.", 'success');
+      setQuery('');
+      return;
+    }
 
     // Check Limits
     if (!isPro && dailySearches >= 5) {
@@ -303,23 +359,16 @@ const AppContent: React.FC = () => {
       const prices = await fetchGroceryPricesForList(items, location);
 
       if (prices.length > 0) {
+        // 1. Update Shopping List Items
         setShoppingLists(prevLists => prevLists.map(list => ({
           ...list,
           items: list.items.map(item => {
-            // Find matching price update with robust matching
             const match = prices.find(p => {
               const query = p.originalQuery?.toLowerCase().trim();
               const itemName = item.name.toLowerCase().trim();
-
-              // 1. Exact match on originalQuery
               if (query === itemName) return true;
-
-              // 2. Containment match on originalQuery (e.g. "eggs" matches "large eggs")
               if (query && (itemName.includes(query) || query.includes(itemName))) return true;
-
-              // 3. Fallback: Product name contains item name (e.g. "Lucerne Milk" contains "Milk")
               if (p.productName?.toLowerCase().includes(itemName)) return true;
-
               return false;
             });
 
@@ -334,6 +383,51 @@ const AppContent: React.FC = () => {
             return item;
           })
         })));
+
+        // 2. Update Price History
+        const now = new Date();
+        const currentHourKey = `${now.toISOString().slice(0, 13)}:00`;
+
+        setPriceHistory(prev => {
+          const newHistory = { ...prev };
+
+          // Helper to update history for a specific key
+          const updateForKey = (key: string, pricePoint: { date: string, price: number, store: string }) => {
+            const currentProductHistory = { ...(newHistory[key] || {}) };
+
+            if (!currentProductHistory[pricePoint.store]) {
+              currentProductHistory[pricePoint.store] = [];
+            } else {
+              currentProductHistory[pricePoint.store] = [...currentProductHistory[pricePoint.store]];
+            }
+
+            const existingHourIndex = currentProductHistory[pricePoint.store].findIndex(p => p.date === currentHourKey);
+
+            if (existingHourIndex === -1) {
+              currentProductHistory[pricePoint.store].push({ date: currentHourKey, price: pricePoint.price });
+            } else {
+              const newPoints = [...currentProductHistory[pricePoint.store]];
+              newPoints[existingHourIndex] = { ...newPoints[existingHourIndex], price: pricePoint.price };
+              currentProductHistory[pricePoint.store] = newPoints;
+            }
+            newHistory[key] = currentProductHistory;
+          };
+
+          prices.forEach(p => {
+            // Relaxed check: allow if either originalQuery OR productName is present
+            if ((!p.originalQuery && !p.productName) || !p.store || !p.price) return;
+
+            const queryKey = p.originalQuery?.toLowerCase().trim();
+            const productKey = p.productName?.toLowerCase().trim();
+            const point = { date: currentHourKey, price: p.price, store: p.store };
+
+            if (queryKey) updateForKey(queryKey, point);
+            if (productKey && productKey !== queryKey) updateForKey(productKey, point);
+          });
+
+          return newHistory;
+        });
+
       } else {
         addToast("No price data found for these items. Try searching for them individually.", 'warning');
       }
@@ -605,6 +699,7 @@ const AppContent: React.FC = () => {
             user={user}
             onLoginRequest={() => setShowAuthModal(true)}
             knownItems={Object.keys(priceHistory)}
+            priceHistory={priceHistory}
           />
         )}
       </main>
