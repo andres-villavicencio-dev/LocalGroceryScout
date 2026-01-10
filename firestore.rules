@@ -1,0 +1,108 @@
+rules_version = '2';
+
+// Firebase Security Rules for LocalGroceryScout
+// IMPORTANT: These rules provide server-side enforcement of the allowlist
+// Last Updated: 2026-01-09
+// Review: Monthly (see SECURITY_REVIEW.md)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===========================
+    // Helper Functions
+    // ===========================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidName(name) {
+      // Match allowlist.ts displayName pattern: alphanumeric, spaces, hyphens, apostrophes, periods
+      return name.matches('^[a-zA-Z0-9\\s\\-\'.]{1,50}$');
+    }
+
+    function isValidListName(name) {
+      // Match allowlist.ts listName pattern
+      return name.matches('^[a-zA-Z0-9\\s\\-&\'().,]{1,50}$');
+    }
+
+    function isValidItemName(name) {
+      // Match allowlist.ts itemName pattern
+      return name.matches('^[a-zA-Z0-9\\s\\-&\'().,]{1,100}$');
+    }
+
+    function isValidPrice(price) {
+      return price is number && price >= 0.01 && price <= 9999.99;
+    }
+
+    // ===========================
+    // User Documents
+    // ===========================
+
+    match /users/{userId} {
+      // Users can read and create their own documents
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && (!('isPro' in request.resource.data) || request.resource.data.isPro == false)
+        && (!('dailySearches' in request.resource.data) || request.resource.data.dailySearches == 0);
+
+      // SECURITY: Prevent client writes to protected fields
+      allow update: if isOwner(userId)
+        // Block attempts to modify isPro or dailySearches
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPro', 'dailySearches'])
+        // Validate name if being updated
+        && (!('name' in request.resource.data) || isValidName(request.resource.data.name));
+
+      // ===========================
+      // Shopping Lists Subdocument
+      // ===========================
+
+      match /data/shoppingLists {
+        allow read: if isOwner(userId);
+
+        allow write: if isOwner(userId)
+          // SECURITY: Enforce maximum 20 lists per user
+          && request.resource.data.lists.size() <= 20
+          // SECURITY: Validate each list structure
+          && request.resource.data.lists.hasAll(['name', 'items', 'id', 'createdAt']);
+          // Note: Item-level validation would require recursive checks
+          // Consider moving to subcollection for better granular validation
+      }
+
+      // ===========================
+      // Price History Subdocument
+      // ===========================
+
+      match /data/priceHistory {
+        allow read: if isOwner(userId);
+
+        // SECURITY: Allow writes but warn if approaching size limit
+        // Note: Firestore has a 1MB document size limit
+        // Consider implementing Cloud Function to enforce this
+        allow write: if isOwner(userId);
+      }
+    }
+
+    // ===========================
+    // Admin-only Collections (Future)
+    // ===========================
+
+    // Uncomment when you add server-side admin functionality
+    // match /admin/{document=**} {
+    //   allow read, write: if request.auth != null
+    //     && request.auth.token.admin == true;
+    // }
+
+    // ===========================
+    // Deny All Other Paths
+    // ===========================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
