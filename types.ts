@@ -58,7 +58,16 @@ export interface User {
   name: string;
   email: string;
   avatar?: string;
+
+  // Pro Subscription Fields
   isPro?: boolean;
+  stripeCustomerId?: string;
+  subscriptionId?: string;
+  subscriptionStatus?: 'active' | 'canceled' | 'past_due' | 'trialing';
+  subscriptionEndDate?: string; // ISO date string
+  lastVerified?: string; // ISO date string
+
+  // Usage Tracking
   dailySearches?: number;
   lastSearchDate?: string;
 }

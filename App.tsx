@@ -720,11 +720,6 @@ const AppContent: React.FC = () => {
       <UpgradeModal
         isOpen={showUpgradeModal}
         onClose={() => setShowUpgradeModal(false)}
-        onUpgrade={() => {
-          setIsPro(true);
-          setShowUpgradeModal(false);
-          addToast("Welcome to Pro! You now have unlimited searches.", 'success');
-        }}
       />
     </div>
   );
