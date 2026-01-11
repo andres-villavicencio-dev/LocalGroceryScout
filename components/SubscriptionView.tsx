@@ -18,6 +18,12 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({ user, onClos
   const [error, setError] = useState<string | null>(null);
 
   const handleManageSubscription = async () => {
+    // Check if user has a Stripe subscription
+    if (!user?.stripeCustomerId) {
+      setError('No subscription found. Your Pro status may have been set manually for testing.');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
 
@@ -160,9 +166,16 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({ user, onClos
           {/* Action Buttons */}
           {isPro ? (
             <div className="space-y-3">
+              {!user?.stripeCustomerId && (
+                <div className="mb-3 p-3 bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-lg">
+                  <p className="text-amber-700 dark:text-amber-400 text-xs">
+                    <strong>Testing Mode:</strong> Your Pro status was set manually. To manage a real subscription, please upgrade through the app.
+                  </p>
+                </div>
+              )}
               <button
                 onClick={handleManageSubscription}
-                disabled={isLoading}
+                disabled={isLoading || !user?.stripeCustomerId}
                 className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl transition-colors shadow-lg hover:shadow-emerald-500/30 flex items-center justify-center"
               >
                 {isLoading ? (
@@ -177,9 +190,11 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({ user, onClos
                   'Manage Subscription'
                 )}
               </button>
-              <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-                Update payment method, view billing history, or cancel subscription
-              </p>
+              {user?.stripeCustomerId && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                  Update payment method, view billing history, or cancel subscription
+                </p>
+              )}
             </div>
           ) : (
             <div className="space-y-3">

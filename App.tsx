@@ -678,13 +678,17 @@ const AppContent: React.FC = () => {
                 <div className="flex flex-col items-start">
                   <span className="text-sm font-medium text-gray-700 dark:text-gray-200 hidden sm:inline">{user.name}</span>
                   {isPro && (
-                    <button onClick={() => setShowSubscriptionView(true)} className="hidden sm:inline-flex">
-                      <ProBadge />
-                    </button>
+                    user.stripeCustomerId ? (
+                      <button onClick={() => setShowSubscriptionView(true)} className="hidden sm:inline-flex">
+                        <ProBadge />
+                      </button>
+                    ) : (
+                      <ProBadge className="hidden sm:inline-flex" />
+                    )
                   )}
                 </div>
               </div>
-              {isPro && (
+              {isPro && user.stripeCustomerId && (
                 <button
                   onClick={() => setShowSubscriptionView(true)}
                   className="text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 font-medium"
