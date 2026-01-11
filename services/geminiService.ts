@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Tool } from "@google/genai";
 import { GeoLocation, SearchResult, ParsedPrice } from "../types";
+import { validate, validateBatch, sanitizeAIResponse, ALLOWLISTS } from "../src/utils/allowlist";
 
 const API_KEY = process.env.API_KEY;
 
@@ -26,13 +27,25 @@ const parsePriceData = (text: string): ParsedPrice[] => {
         if (store && priceStr) {
           // Clean price string (remove currency symbols, approx, etc)
           const priceVal = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
-          if (!isNaN(priceVal)) {
+
+          // Validate store name
+          const storeValidation = validate(store, 'storeName');
+          if (!storeValidation.valid) {
+            console.warn(`Invalid store name: ${store}`);
+            continue;
+          }
+
+          // Validate price
+          const priceValidation = validate(priceVal, 'price');
+          if (!isNaN(priceVal) && priceValidation.valid) {
             prices.push({
-              store,
+              store: sanitizeAIResponse(store),
               price: priceVal,
-              productName: productName || undefined,
-              originalQuery: originalQuery || undefined
+              productName: productName ? sanitizeAIResponse(productName) : undefined,
+              originalQuery: originalQuery ? sanitizeAIResponse(originalQuery) : undefined
             });
+          } else {
+            console.warn(`Invalid price: ${priceVal} for store ${store}`);
           }
         }
       }
@@ -44,6 +57,12 @@ const parsePriceData = (text: string): ParsedPrice[] => {
 };
 
 export const identifyProductFromBarcode = async (barcode: string): Promise<string> => {
+  // SECURITY: Validate barcode format (prevent prompt injection)
+  const barcodeValidation = validate(barcode, 'barcode');
+  if (!barcodeValidation.valid) {
+    throw new Error(`Invalid barcode format: ${barcodeValidation.error}`);
+  }
+
   // 1. Try Open Food Facts API first (Free, no key required)
   try {
     const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
@@ -86,13 +105,20 @@ export const identifyProductFromBarcode = async (barcode: string): Promise<strin
     throw new Error("Product could not be identified from barcode.");
   }
 
-  return text.replace(/\.$/, '');
+  // SECURITY: Sanitize AI response before returning
+  return sanitizeAIResponse(text.replace(/\.$/, ''));
 }
 
 export const fetchGroceryPrices = async (
   query: string,
   location?: GeoLocation
 ): Promise<SearchResult> => {
+  // SECURITY: Validate search query (prevent prompt injection)
+  const queryValidation = validate(query, 'searchQuery');
+  if (!queryValidation.valid) {
+    throw new Error(`Invalid search query: ${queryValidation.error}`);
+  }
+
   if (!API_KEY) throw new Error("API Key not found");
 
   const ai = new GoogleGenAI({ apiKey: API_KEY });
@@ -159,11 +185,12 @@ export const fetchGroceryPrices = async (
     // Remove the technical data block from the display text
     const displayText = fullText.split('---PRICE_DATA---')[0];
 
+    // SECURITY: Sanitize AI response before returning
     return {
-      text: displayText,
+      text: sanitizeAIResponse(displayText),
       groundingMetadata,
       parsedPrices,
-      productName: query
+      productName: sanitizeAIResponse(query)
     };
   } catch (error) {
     console.error("Error fetching grocery prices:", error);
@@ -177,6 +204,12 @@ export const fetchGroceryPricesForList = async (
 ): Promise<ParsedPrice[]> => {
   if (!API_KEY) throw new Error("API Key not found");
   if (items.length === 0) return [];
+
+  // SECURITY: Validate all item names (prevent prompt injection)
+  const itemsValidation = validateBatch(items, 'itemName');
+  if (!itemsValidation.valid) {
+    throw new Error(`Invalid item in list: ${itemsValidation.error}`);
+  }
 
   const ai = new GoogleGenAI({ apiKey: API_KEY });
   const tools: Tool[] = [{ googleMaps: {} }, { googleSearch: {} }];

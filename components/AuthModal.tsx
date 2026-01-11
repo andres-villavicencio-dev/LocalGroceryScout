@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { auth, googleProvider } from '../services/firebase';
+import { validate } from '../src/utils/allowlist';
 
 interface AuthModalProps {
   onLogin: () => void;
@@ -34,6 +35,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin, onClose }) => {
     e.preventDefault();
     if (!email || !password) return;
 
+    // SECURITY: Validate display name before signup
+    if (isSignUp && name) {
+      const nameValidation = validate(name, 'displayName');
+      if (!nameValidation.valid) {
+        setError(nameValidation.error || 'Invalid name format');
+        return;
+      }
+    }
+
     setIsLoading(true);
     setError(null);
 
@@ -41,7 +51,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin, onClose }) => {
       if (isSignUp) {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         if (name) {
-          await updateProfile(userCredential.user, { displayName: name });
+          // Use sanitized name
+          await updateProfile(userCredential.user, { displayName: name.trim() });
         }
       } else {
         await signInWithEmailAndPassword(auth, email, password);
