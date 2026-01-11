@@ -16,18 +16,21 @@ This file tracks your Stripe configuration values for Local Grocery Scout.
 
 ### API Keys (from https://dashboard.stripe.com/test/apikeys)
 ```bash
-# Publishable Key (starts with pk_test_)
-VITE_STRIPE_PUBLISHABLE_KEY=pk_test_YOUR_KEY_HERE
+# Publishable Key (starts with pk_test_) - CONFIGURED ✅
+VITE_STRIPE_PUBLISHABLE_KEY=pk_test_51SFCTs... (in .env file)
 
-# Secret Key (starts with sk_test_)
+# Secret Key (starts with sk_test_) - CONFIGURED ✅
 # DO NOT commit this to git!
-STRIPE_SECRET_KEY=sk_test_YOUR_KEY_HERE
+STRIPE_SECRET_KEY=sk_test_51SFCTs... (in functions/.env file)
 ```
 
 ### Product & Pricing (from https://dashboard.stripe.com/test/products)
 ```bash
-# Price ID (starts with price_)
-STRIPE_PRICE_ID=price_YOUR_PRICE_ID_HERE
+# Price ID (starts with price_) - CONFIGURED ✅
+STRIPE_PRICE_ID=price_1SoIZpD8dms63MUGP4Dwg75i
+
+# Product ID (for reference)
+PRODUCT_ID=prod_TlqGl7MevzQ3fy
 ```
 
 ### Webhook (from https://dashboard.stripe.com/test/webhooks)
