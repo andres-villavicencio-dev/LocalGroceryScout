@@ -4,6 +4,7 @@ import { ShoppingList, ShoppingListItem, User } from '../types';
 import { BarcodeScanner } from './BarcodeScanner';
 import { identifyProductFromBarcode } from '../services/geminiService';
 import { PriceHistoryChart } from './PriceHistoryChart';
+import { UpgradeButton, ProBadge } from './UpgradeButton';
 
 interface ShoppingListViewProps {
   lists: ShoppingList[];
@@ -13,6 +14,8 @@ interface ShoppingListViewProps {
   isScouting: boolean;
   user: User | null;
   onLoginRequest: () => void;
+  onUpgradeRequest?: () => void;
+  isPro?: boolean;
   knownItems?: string[];
   priceHistory?: Record<string, any>; // Using any for now to avoid deep type imports if not needed, or import ProductHistory
 }
@@ -38,7 +41,7 @@ const ESSENTIALS_BUNDLE = ['Milk', 'Eggs', 'Bread', 'Bananas'];
 
 type SortOption = 'name-asc' | 'date-desc' | 'date-asc' | 'price-asc' | 'price-desc';
 
-export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLists, onSearchItem, onScoutList, isScouting, user, onLoginRequest, knownItems, priceHistory }) => {
+export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLists, onSearchItem, onScoutList, isScouting, user, onLoginRequest, onUpgradeRequest, isPro = false, knownItems, priceHistory }) => {
   const [activeListId, setActiveListId] = useState<string>(lists.length > 0 ? lists[0].id : '');
   const [newItemName, setNewItemName] = useState('');
   const [newListName, setNewListName] = useState('');
@@ -298,6 +301,30 @@ export const ShoppingListView: React.FC<ShoppingListViewProps> = ({ lists, setLi
           </button>
         ))}
       </div>
+
+      {/* Pro Upgrade Banner - Show for non-Pro users */}
+      {!isPro && onUpgradeRequest && (
+        <div className="mb-6 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border-2 border-amber-200 dark:border-amber-800 rounded-xl p-5 shadow-sm">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <svg className="w-5 h-5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                </svg>
+                <h4 className="font-bold text-amber-900 dark:text-amber-300">Unlock Unlimited Shopping Lists</h4>
+              </div>
+              <p className="text-sm text-amber-700 dark:text-amber-400">
+                Go Pro for unlimited searches, no ads, and priority support. Perfect for serious shoppers!
+              </p>
+            </div>
+            <UpgradeButton
+              onClick={onUpgradeRequest}
+              variant="primary"
+              className="whitespace-nowrap"
+            />
+          </div>
+        </div>
+      )}
 
       {activeList && (
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden transition-colors">

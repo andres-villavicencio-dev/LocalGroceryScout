@@ -8,6 +8,7 @@ import { BarcodeScanner } from './components/BarcodeScanner';
 import { AuthModal } from './components/AuthModal';
 import { AdBanner } from './components/AdBanner';
 import { UpgradeModal } from './components/UpgradeModal';
+import { UpgradeButton, ProBadge } from './components/UpgradeButton';
 import { auth } from './services/firebase';
 import { saveUserData, getUserData, saveShoppingLists, getShoppingLists, savePriceHistory, getPriceHistory } from './services/firestoreService';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -327,6 +328,7 @@ const AppContent: React.FC = () => {
 
     // Check Limits
     if (!isPro && dailySearches >= 5) {
+      addToast('Daily search limit reached. Upgrade to Pro for unlimited searches!', 'warning');
       setShowUpgradeModal(true);
       return;
     }
@@ -561,13 +563,28 @@ const AppContent: React.FC = () => {
         </div>
       </form>
 
-      <div className="mt-8 flex gap-4">
+      <div className="mt-8 flex flex-col items-center gap-4">
         <button
           onClick={() => setState(AppState.LISTS)}
           className="flex items-center text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-gray-800 hover:bg-emerald-100 dark:hover:bg-gray-700 px-6 py-3 rounded-lg font-medium transition-colors"
         >
           <span className="mr-2">📝</span> View Shopping Lists
         </button>
+
+        {/* Free tier info */}
+        {!isPro && (
+          <div className="text-center mt-2">
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+              {dailySearches}/5 free searches today
+            </p>
+            <button
+              onClick={() => setShowUpgradeModal(true)}
+              className="text-sm text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 font-medium underline"
+            >
+              Get unlimited searches with Pro
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -642,13 +659,24 @@ const AppContent: React.FC = () => {
             Lists
           </button>
 
+          {/* Upgrade Button - Show for non-Pro users */}
+          {!isPro && (
+            <UpgradeButton
+              onClick={() => setShowUpgradeModal(true)}
+              variant="nav"
+            />
+          )}
+
           {user ? (
             <div className="flex items-center gap-3 pl-3 border-l border-gray-200 dark:border-gray-700">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full bg-emerald-200 dark:bg-emerald-800 flex items-center justify-center text-emerald-800 dark:text-emerald-200 font-bold text-xs overflow-hidden">
                   {user.avatar ? <img src={user.avatar} alt={user.name} className="w-full h-full" /> : user.name[0]}
                 </div>
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-200 hidden sm:inline">{user.name}</span>
+                <div className="flex flex-col items-start">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200 hidden sm:inline">{user.name}</span>
+                  {isPro && <ProBadge className="hidden sm:inline-flex" />}
+                </div>
               </div>
               <button
                 onClick={handleLogout}
@@ -698,6 +726,8 @@ const AppContent: React.FC = () => {
             isScouting={isScouting}
             user={user}
             onLoginRequest={() => setShowAuthModal(true)}
+            onUpgradeRequest={() => setShowUpgradeModal(true)}
+            isPro={isPro}
             knownItems={Object.keys(priceHistory)}
             priceHistory={priceHistory}
           />
