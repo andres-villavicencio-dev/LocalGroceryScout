@@ -9,6 +9,7 @@ import { AuthModal } from './components/AuthModal';
 import { AdBanner } from './components/AdBanner';
 import { UpgradeModal } from './components/UpgradeModal';
 import { UpgradeButton, ProBadge } from './components/UpgradeButton';
+import { SubscriptionView } from './components/SubscriptionView';
 import { auth } from './services/firebase';
 import { saveUserData, getUserData, saveShoppingLists, getShoppingLists, savePriceHistory, getPriceHistory } from './services/firestoreService';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -31,6 +32,7 @@ const AppContent: React.FC = () => {
   });
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showSubscriptionView, setShowSubscriptionView] = useState(false);
 
   // Monetization State (Local for guest, synced for user)
   const [isPro, setIsPro] = useState(() => {
@@ -675,9 +677,21 @@ const AppContent: React.FC = () => {
                 </div>
                 <div className="flex flex-col items-start">
                   <span className="text-sm font-medium text-gray-700 dark:text-gray-200 hidden sm:inline">{user.name}</span>
-                  {isPro && <ProBadge className="hidden sm:inline-flex" />}
+                  {isPro && (
+                    <button onClick={() => setShowSubscriptionView(true)} className="hidden sm:inline-flex">
+                      <ProBadge />
+                    </button>
+                  )}
                 </div>
               </div>
+              {isPro && (
+                <button
+                  onClick={() => setShowSubscriptionView(true)}
+                  className="text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 font-medium"
+                >
+                  Manage
+                </button>
+              )}
               <button
                 onClick={handleLogout}
                 className="text-xs text-gray-400 hover:text-red-500 font-medium"
@@ -751,6 +765,13 @@ const AppContent: React.FC = () => {
         isOpen={showUpgradeModal}
         onClose={() => setShowUpgradeModal(false)}
       />
+
+      {showSubscriptionView && (
+        <SubscriptionView
+          user={user}
+          onClose={() => setShowSubscriptionView(false)}
+        />
+      )}
     </div>
   );
 };
