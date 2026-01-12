@@ -56,7 +56,16 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     const date = new Date().toISOString().split('T')[0];
     localStorage.setItem('grocery_daily_searches', JSON.stringify({ count: dailySearches, date }));
-  }, [dailySearches]);
+
+    // Sync to Firestore if user is logged in
+    if (user && user.id) {
+      saveUserData({
+        ...user,
+        dailySearches: dailySearches,
+        lastSearchDate: date
+      });
+    }
+  }, [dailySearches, user]);
 
   // Dark Mode State
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -131,18 +140,24 @@ const AppContent: React.FC = () => {
         // 1. Fetch extended user data from Firestore
         const firestoreUser = await getUserData(firebaseUser.uid);
 
+        // Check if we need to reset daily searches (new day)
+        const today = new Date().toISOString().split('T')[0];
+        const lastSearchDate = firestoreUser?.lastSearchDate || today;
+        const shouldResetSearches = lastSearchDate !== today;
+
         const appUser: User = {
           id: firebaseUser.uid,
           name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
           email: firebaseUser.email || '',
           avatar: firebaseUser.photoURL || undefined,
-          isPro: firestoreUser?.isPro || isPro, // Prefer Firestore, fallback to local
-          dailySearches: firestoreUser?.dailySearches || 0,
-          lastSearchDate: firestoreUser?.lastSearchDate || new Date().toISOString().split('T')[0]
+          isPro: firestoreUser?.isPro || false, // Prefer Firestore, default to false
+          dailySearches: shouldResetSearches ? 0 : (firestoreUser?.dailySearches || 0),
+          lastSearchDate: today
         };
 
         setUser(appUser);
         setIsPro(appUser.isPro || false); // Update local state to match cloud
+        setDailySearches(appUser.dailySearches || 0); // Sync daily searches with Firestore
 
         // 2. Load Data from Firestore
         const cloudLists = await getShoppingLists(firebaseUser.uid);
@@ -211,9 +226,20 @@ const AppContent: React.FC = () => {
     try {
       await signOut(auth);
       setUser(null);
+      setIsPro(false); // Reset to free tier for guest mode
       setState(AppState.READY);
       setQuery('');
       setResult(null);
+
+      // Restore guest's daily search count from localStorage
+      const saved = localStorage.getItem('grocery_daily_searches');
+      if (saved) {
+        const { count, date } = JSON.parse(saved);
+        const today = new Date().toISOString().split('T')[0];
+        setDailySearches(date === today ? count : 0);
+      } else {
+        setDailySearches(0);
+      }
     } catch (error) {
       console.error("Error signing out", error);
     }
@@ -328,14 +354,29 @@ const AppContent: React.FC = () => {
       return;
     }
 
-    // Check Limits
-    if (!isPro && dailySearches >= 5) {
+    // Check if we need to reset daily searches (new day)
+    const today = new Date().toISOString().split('T')[0];
+    const savedData = localStorage.getItem('grocery_daily_searches');
+    let currentSearchCount = dailySearches;
+
+    if (savedData) {
+      const { date } = JSON.parse(savedData);
+      if (date !== today) {
+        // New day - reset counter
+        currentSearchCount = 0;
+        setDailySearches(0);
+      }
+    }
+
+    // Check Limits - block search if already at 5
+    if (!isPro && currentSearchCount >= 5) {
       addToast('Daily search limit reached. Upgrade to Pro for unlimited searches!', 'warning');
       setShowUpgradeModal(true);
       return;
     }
 
-    setDailySearches(prev => prev + 1);
+    // Increment counter
+    setDailySearches(currentSearchCount + 1);
     setQuery(searchQuery);
     setState(AppState.SEARCHING);
     setError(null);
