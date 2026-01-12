@@ -36,7 +36,7 @@ const db = admin.firestore();
  * @param email - User's email address
  * @returns {checkoutUrl: string} - URL to redirect user to Stripe Checkout
  */
-export const createCheckoutSession = functions.https.onCall(async (data, context) => {
+export const createCheckoutSession = functions.https.onCall(async (data: any, context: functions.https.CallableContext) => {
   // Security: Verify user is authenticated
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -145,7 +145,7 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
  * - customer.subscription.updated: Subscription modified
  * - customer.subscription.deleted: Subscription cancelled
  */
-export const handleStripeWebhook = functions.https.onRequest(async (req, res) => {
+export const handleStripeWebhook = functions.https.onRequest(async (req: functions.https.Request, res: functions.Response) => {
   // Only accept POST requests
   if (req.method !== 'POST') {
     res.status(405).send('Method Not Allowed');
@@ -448,7 +448,7 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
  * @param userId - The authenticated user's Firebase UID
  * @returns {portalUrl: string} - URL to redirect user to Stripe Customer Portal
  */
-export const createPortalSession = functions.https.onCall(async (data, context) => {
+export const createPortalSession = functions.https.onCall(async (data: any, context: functions.https.CallableContext) => {
   // Security: Verify user is authenticated
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -505,7 +505,7 @@ export const createPortalSession = functions.https.onCall(async (data, context) 
  * Callable function to verify a user's subscription status directly with Stripe
  * Useful for additional security checks or when Firestore data might be stale
  */
-export const verifySubscriptionStatus = functions.https.onCall(async (data, context) => {
+export const verifySubscriptionStatus = functions.https.onCall(async (data: any, context: functions.https.CallableContext) => {
   if (!context.auth) {
     throw new functions.https.HttpsError(
       'unauthenticated',

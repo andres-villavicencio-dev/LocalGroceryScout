@@ -8,6 +8,8 @@ import { BarcodeScanner } from './components/BarcodeScanner';
 import { AuthModal } from './components/AuthModal';
 import { AdBanner } from './components/AdBanner';
 import { UpgradeModal } from './components/UpgradeModal';
+import { UpgradeButton, ProBadge } from './components/UpgradeButton';
+import { SubscriptionView } from './components/SubscriptionView';
 import { auth } from './services/firebase';
 import { saveUserData, getUserData, saveShoppingLists, getShoppingLists, savePriceHistory, getPriceHistory } from './services/firestoreService';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -30,6 +32,7 @@ const AppContent: React.FC = () => {
   });
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showSubscriptionView, setShowSubscriptionView] = useState(false);
 
   // Monetization State (Local for guest, synced for user)
   const [isPro, setIsPro] = useState(() => {
@@ -53,7 +56,16 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     const date = new Date().toISOString().split('T')[0];
     localStorage.setItem('grocery_daily_searches', JSON.stringify({ count: dailySearches, date }));
-  }, [dailySearches]);
+
+    // Sync to Firestore if user is logged in
+    if (user && user.id) {
+      saveUserData({
+        ...user,
+        dailySearches: dailySearches,
+        lastSearchDate: date
+      });
+    }
+  }, [dailySearches, user]);
 
   // Dark Mode State
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -128,18 +140,24 @@ const AppContent: React.FC = () => {
         // 1. Fetch extended user data from Firestore
         const firestoreUser = await getUserData(firebaseUser.uid);
 
+        // Check if we need to reset daily searches (new day)
+        const today = new Date().toISOString().split('T')[0];
+        const lastSearchDate = firestoreUser?.lastSearchDate || today;
+        const shouldResetSearches = lastSearchDate !== today;
+
         const appUser: User = {
           id: firebaseUser.uid,
           name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
           email: firebaseUser.email || '',
           avatar: firebaseUser.photoURL || undefined,
-          isPro: firestoreUser?.isPro || isPro, // Prefer Firestore, fallback to local
-          dailySearches: firestoreUser?.dailySearches || 0,
-          lastSearchDate: firestoreUser?.lastSearchDate || new Date().toISOString().split('T')[0]
+          isPro: firestoreUser?.isPro || false, // Prefer Firestore, default to false
+          dailySearches: shouldResetSearches ? 0 : (firestoreUser?.dailySearches || 0),
+          lastSearchDate: today
         };
 
         setUser(appUser);
         setIsPro(appUser.isPro || false); // Update local state to match cloud
+        setDailySearches(appUser.dailySearches || 0); // Sync daily searches with Firestore
 
         // 2. Load Data from Firestore
         const cloudLists = await getShoppingLists(firebaseUser.uid);
@@ -208,9 +226,20 @@ const AppContent: React.FC = () => {
     try {
       await signOut(auth);
       setUser(null);
+      setIsPro(false); // Reset to free tier for guest mode
       setState(AppState.READY);
       setQuery('');
       setResult(null);
+
+      // Restore guest's daily search count from localStorage
+      const saved = localStorage.getItem('grocery_daily_searches');
+      if (saved) {
+        const { count, date } = JSON.parse(saved);
+        const today = new Date().toISOString().split('T')[0];
+        setDailySearches(date === today ? count : 0);
+      } else {
+        setDailySearches(0);
+      }
     } catch (error) {
       console.error("Error signing out", error);
     }
@@ -325,13 +354,29 @@ const AppContent: React.FC = () => {
       return;
     }
 
-    // Check Limits
-    if (!isPro && dailySearches >= 5) {
+    // Check if we need to reset daily searches (new day)
+    const today = new Date().toISOString().split('T')[0];
+    const savedData = localStorage.getItem('grocery_daily_searches');
+    let currentSearchCount = dailySearches;
+
+    if (savedData) {
+      const { date } = JSON.parse(savedData);
+      if (date !== today) {
+        // New day - reset counter
+        currentSearchCount = 0;
+        setDailySearches(0);
+      }
+    }
+
+    // Check Limits - block search if already at 5
+    if (!isPro && currentSearchCount >= 5) {
+      addToast('Daily search limit reached. Upgrade to Pro for unlimited searches!', 'warning');
       setShowUpgradeModal(true);
       return;
     }
 
-    setDailySearches(prev => prev + 1);
+    // Increment counter
+    setDailySearches(currentSearchCount + 1);
     setQuery(searchQuery);
     setState(AppState.SEARCHING);
     setError(null);
@@ -561,13 +606,28 @@ const AppContent: React.FC = () => {
         </div>
       </form>
 
-      <div className="mt-8 flex gap-4">
+      <div className="mt-8 flex flex-col items-center gap-4">
         <button
           onClick={() => setState(AppState.LISTS)}
           className="flex items-center text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-gray-800 hover:bg-emerald-100 dark:hover:bg-gray-700 px-6 py-3 rounded-lg font-medium transition-colors"
         >
           <span className="mr-2">📝</span> View Shopping Lists
         </button>
+
+        {/* Free tier info */}
+        {!isPro && (
+          <div className="text-center mt-2">
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+              {dailySearches}/5 free searches today
+            </p>
+            <button
+              onClick={() => setShowUpgradeModal(true)}
+              className="text-sm text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 font-medium underline"
+            >
+              Get unlimited searches with Pro
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -642,14 +702,41 @@ const AppContent: React.FC = () => {
             Lists
           </button>
 
+          {/* Upgrade Button - Show for non-Pro users */}
+          {!isPro && (
+            <UpgradeButton
+              onClick={() => setShowUpgradeModal(true)}
+              variant="nav"
+            />
+          )}
+
           {user ? (
             <div className="flex items-center gap-3 pl-3 border-l border-gray-200 dark:border-gray-700">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full bg-emerald-200 dark:bg-emerald-800 flex items-center justify-center text-emerald-800 dark:text-emerald-200 font-bold text-xs overflow-hidden">
                   {user.avatar ? <img src={user.avatar} alt={user.name} className="w-full h-full" /> : user.name[0]}
                 </div>
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-200 hidden sm:inline">{user.name}</span>
+                <div className="flex flex-col items-start">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200 hidden sm:inline">{user.name}</span>
+                  {isPro && (
+                    user.stripeCustomerId ? (
+                      <button onClick={() => setShowSubscriptionView(true)} className="hidden sm:inline-flex">
+                        <ProBadge />
+                      </button>
+                    ) : (
+                      <ProBadge className="hidden sm:inline-flex" />
+                    )
+                  )}
+                </div>
               </div>
+              {isPro && user.stripeCustomerId && (
+                <button
+                  onClick={() => setShowSubscriptionView(true)}
+                  className="text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 font-medium"
+                >
+                  Manage
+                </button>
+              )}
               <button
                 onClick={handleLogout}
                 className="text-xs text-gray-400 hover:text-red-500 font-medium"
@@ -698,6 +785,8 @@ const AppContent: React.FC = () => {
             isScouting={isScouting}
             user={user}
             onLoginRequest={() => setShowAuthModal(true)}
+            onUpgradeRequest={() => setShowUpgradeModal(true)}
+            isPro={isPro}
             knownItems={Object.keys(priceHistory)}
             priceHistory={priceHistory}
           />
@@ -721,6 +810,13 @@ const AppContent: React.FC = () => {
         isOpen={showUpgradeModal}
         onClose={() => setShowUpgradeModal(false)}
       />
+
+      {showSubscriptionView && (
+        <SubscriptionView
+          user={user}
+          onClose={() => setShowSubscriptionView(false)}
+        />
+      )}
     </div>
   );
 };
