@@ -8,8 +8,10 @@ import { BarcodeScanner } from './components/BarcodeScanner';
 import { AuthModal } from './components/AuthModal';
 import { AdBanner } from './components/AdBanner';
 import { UpgradeModal } from './components/UpgradeModal';
+import { SuccessPage } from './components/SuccessPage';
+import { CancelPage } from './components/CancelPage';
 import { auth } from './services/firebase';
-import { saveUserData, getUserData, saveShoppingLists, getShoppingLists, savePriceHistory, getPriceHistory } from './services/firestoreService';
+import { saveUserData, getUserData, subscribeToUserData, saveShoppingLists, getShoppingLists, savePriceHistory, getPriceHistory } from './services/firestoreService';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { ToastContainer } from './components/ToastContainer';
@@ -32,9 +34,13 @@ const AppContent: React.FC = () => {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   // Monetization State (Local for guest, synced for user)
-  const [isPro, setIsPro] = useState(() => {
-    return localStorage.getItem('grocery_is_pro') === 'true';
-  });
+  // IMPORTANT: Initialize as false, let Firestore be the source of truth
+  // This prevents stale localStorage cache from blocking webhook updates
+  const [isPro, setIsPro] = useState(false);
+
+  // Payment flow state
+  const [showSuccessPage, setShowSuccessPage] = useState(false);
+  const [showCancelPage, setShowCancelPage] = useState(false);
   const [dailySearches, setDailySearches] = useState(() => {
     const saved = localStorage.getItem('grocery_daily_searches');
     if (saved) {
@@ -46,6 +52,7 @@ const AppContent: React.FC = () => {
     return 0;
   });
 
+  // Save isPro to localStorage (for caching), but Firestore is always source of truth
   useEffect(() => {
     localStorage.setItem('grocery_is_pro', String(isPro));
   }, [isPro]);
@@ -121,59 +128,101 @@ const AppContent: React.FC = () => {
     }
   }, [user]);
 
-  // Firebase Auth Listener
+  // Firebase Auth Listener with Real-Time User Data Subscription
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    let unsubscribeFirestore: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      // Clean up previous Firestore listener if it exists
+      if (unsubscribeFirestore) {
+        unsubscribeFirestore();
+        unsubscribeFirestore = null;
+      }
+
       if (firebaseUser) {
-        // 1. Fetch extended user data from Firestore
-        const firestoreUser = await getUserData(firebaseUser.uid);
+        // 1. Set up REAL-TIME listener for user data (including isPro updates from webhooks)
+        unsubscribeFirestore = subscribeToUserData(
+          firebaseUser.uid,
+          (firestoreUser) => {
+            const appUser: User = {
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName || firestoreUser?.name || firebaseUser.email?.split('@')[0] || 'User',
+              email: firebaseUser.email || '',
+              avatar: firebaseUser.photoURL || firestoreUser?.avatar || undefined,
+              isPro: firestoreUser?.isPro || false, // Real-time from Firestore
+              dailySearches: firestoreUser?.dailySearches || 0,
+              lastSearchDate: firestoreUser?.lastSearchDate || new Date().toISOString().split('T')[0]
+            };
 
-        const appUser: User = {
-          id: firebaseUser.uid,
-          name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-          email: firebaseUser.email || '',
-          avatar: firebaseUser.photoURL || undefined,
-          isPro: firestoreUser?.isPro || isPro, // Prefer Firestore, fallback to local
-          dailySearches: firestoreUser?.dailySearches || 0,
-          lastSearchDate: firestoreUser?.lastSearchDate || new Date().toISOString().split('T')[0]
-        };
+            // Update state with real-time data
+            setUser(appUser);
+            setIsPro(appUser.isPro); // This will now update in real-time when webhook changes it!
 
-        setUser(appUser);
-        setIsPro(appUser.isPro || false); // Update local state to match cloud
+            // Save to ensure profile is up to date
+            saveUserData(appUser);
+          },
+          (error) => {
+            console.error('Error in user data subscription:', error);
+            addToast('Error syncing user data', 'error');
+          }
+        );
 
-        // 2. Load Data from Firestore
+        // 2. Initial load of shopping lists and price history (one-time)
         const cloudLists = await getShoppingLists(firebaseUser.uid);
         const cloudHistory = await getPriceHistory(firebaseUser.uid);
 
         if (cloudLists.length > 0) {
           setShoppingLists(cloudLists);
         } else {
-          // First time sync? If we have local guest data, maybe we should upload it?
-          // For now, let's just keep the local data which will be saved to cloud by the useEffects
-          console.log("No cloud lists found, syncing local...");
+          console.log("No cloud lists found, will sync local data on next save");
         }
 
         if (Object.keys(cloudHistory).length > 0) {
           setPriceHistory(cloudHistory);
         }
 
-        // 3. Save latest profile data
-        saveUserData(appUser);
-
         // Data loading complete
         setIsDataLoaded(true);
 
       } else {
+        // User logged out
         setUser(null);
-        setIsDataLoaded(true); // Guest mode is "loaded" immediately (from local storage)
-        // Reset to guest defaults or keep last known? 
-        // Better to clear sensitive info, but maybe keep local guest data if it existed before login?
-        // For simplicity, we rely on the 'user' effect to switch back to '_guest' storage key.
+        setIsPro(false); // Reset to free tier
+        setIsDataLoaded(true);
       }
     });
 
-    return () => unsubscribe();
-  }, []);
+    // Cleanup both listeners
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeFirestore) {
+        unsubscribeFirestore();
+      }
+    };
+  }, [addToast]);
+
+  // Detect payment success/cancel redirects from Stripe
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionId = urlParams.get('session_id');
+    const pathname = window.location.pathname;
+
+    if (sessionId) {
+      // Success page - user completed payment
+      setShowSuccessPage(true);
+      console.log('Payment successful, session ID:', sessionId);
+
+      // Show success toast after brief delay
+      setTimeout(() => {
+        addToast('🎉 Welcome to Pro! Unlimited searches activated.', 'success');
+      }, 1000);
+
+    } else if (pathname === '/cancel' || urlParams.get('canceled') === 'true') {
+      // Cancel page - user cancelled payment
+      setShowCancelPage(true);
+      console.log('Payment cancelled');
+    }
+  }, [addToast]);
 
   // Request location on mount
   useEffect(() => {
@@ -500,6 +549,26 @@ const AppContent: React.FC = () => {
     addToast(`Added "${itemName}" to ${shoppingLists[0]?.name || 'list'}`, 'success');
   };
 
+  // Payment page handlers
+  const handlePaymentSuccessContinue = () => {
+    setShowSuccessPage(false);
+    // Clean URL by removing query parameters
+    window.history.replaceState({}, '', '/');
+    setState(AppState.READY);
+  };
+
+  const handlePaymentCancelContinue = () => {
+    setShowCancelPage(false);
+    window.history.replaceState({}, '', '/');
+    setState(AppState.READY);
+  };
+
+  const handlePaymentCancelTryAgain = () => {
+    setShowCancelPage(false);
+    window.history.replaceState({}, '', '/');
+    setShowUpgradeModal(true); // Re-open the upgrade modal
+  };
+
   const handleReset = () => {
     setQuery('');
     setResult(null);
@@ -599,6 +668,16 @@ const AppContent: React.FC = () => {
       </div>
     </div>
   );
+
+  // Show payment success page if redirected from Stripe with session_id
+  if (showSuccessPage) {
+    return <SuccessPage onContinue={handlePaymentSuccessContinue} />;
+  }
+
+  // Show payment cancel page if user cancelled checkout
+  if (showCancelPage) {
+    return <CancelPage onContinue={handlePaymentCancelContinue} onTryAgain={handlePaymentCancelTryAgain} />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-950 flex flex-col transition-colors duration-300">

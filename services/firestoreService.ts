@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { doc, setDoc, getDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, getDocs, onSnapshot } from 'firebase/firestore';
 import { User, ShoppingList, ProductHistory } from '../types';
 import {
   validate,
@@ -67,6 +67,39 @@ export const getUserData = async (userId: string): Promise<Partial<User> | null>
         console.error("Error fetching user data:", e);
     }
     return null;
+};
+
+// Real-time listener for user data changes (e.g., isPro status updates from webhooks)
+export const subscribeToUserData = (
+    userId: string,
+    onUpdate: (userData: Partial<User> | null) => void,
+    onError?: (error: Error) => void
+): (() => void) => {
+    try {
+        const docRef = doc(db, "users", userId);
+
+        // Set up real-time listener
+        const unsubscribe = onSnapshot(
+            docRef,
+            (docSnap) => {
+                if (docSnap.exists()) {
+                    onUpdate(docSnap.data() as Partial<User>);
+                } else {
+                    onUpdate(null);
+                }
+            },
+            (error) => {
+                console.error("Error in user data subscription:", error);
+                if (onError) onError(error);
+            }
+        );
+
+        return unsubscribe;
+    } catch (e) {
+        console.error("Error setting up user data subscription:", e);
+        if (onError && e instanceof Error) onError(e);
+        return () => {}; // Return no-op cleanup function
+    }
 };
 
 // --- Shopping Lists ---
