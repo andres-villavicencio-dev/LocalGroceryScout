@@ -1286,34 +1286,57 @@ const prices = parsePriceData(machineData);
     <script>
         // Initialize Reveal.js
         Reveal.initialize({
+            // Responsive viewport configuration - THE MISSING KEYS!
+            width: 1920,
+            height: 1080,
+            margin: 0.04,
+            minScale: 0.2,
+            maxScale: 2.0,
+
+            // Navigation & UI
             hash: true,
             controls: true,
             progress: true,
             center: true,
+            slideNumber: 'c/t',
+
+            // Transitions
             transition: 'slide',
             transitionSpeed: 'default',
             backgroundTransition: 'fade',
-            slideNumber: 'c/t',
+
+            // Interaction
             keyboard: true,
             overview: true,
             touch: true,
+            mouseWheel: false,
+
+            // Behavior
             loop: false,
             rtl: false,
             navigationMode: 'default',
             shuffle: false,
+
+            // Fragments
             fragments: true,
             fragmentInURL: true,
-            embedded: false,
-            help: true,
-            pause: true,
-            showNotes: false,
+
+            // Media
             autoPlayMedia: null,
             preloadIframes: null,
+
+            // Auto-animate
             autoAnimate: true,
             autoAnimateMatcher: null,
             autoAnimateEasing: 'ease',
             autoAnimateDuration: 1.0,
             autoAnimateUnmatched: true,
+
+            // Other
+            embedded: false,
+            help: true,
+            pause: true,
+            showNotes: false,
             display: 'block',
             hideInactiveCursor: true,
             hideCursorTime: 5000,
